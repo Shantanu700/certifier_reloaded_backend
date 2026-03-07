@@ -1,0 +1,32 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/docker-existing-docker-compose
+{
+	"name": "Certifer Reloaded Backend (Django 6, Python 3.13)",
+	"dockerComposeFile": [
+		"../docker/nonprod/docker-compose.yaml"
+	],
+	"service": "certifier_django",
+	"workspaceFolder": "/backend",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"batisteo.vscode-django",
+				"streetsidesoftware.code-spell-checker",
+				"njpwerner.autodocstring",
+				"eamodio.gitlens",
+				"ms-azuretools.vscode-docker",
+				"charliermarsh.ruff"
+			],
+			"settings": {
+				"python.defaultInterpreterPath": "/usr/local/bin/python",
+				"terminal.integrated.profiles.linux": {
+					"zsh": {
+						"path": "/usr/bin/zsh"
+					}
+				},
+				"terminal.integrated.defaultProfile.linux": "zsh"
+			}
+		}
+	}
+}
