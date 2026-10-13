@@ -23,6 +23,7 @@ class ModelBase(models.Model):
 
     class Meta:
         abstract = True
+        base_manager_name = "objects"
 
 
 class DropdownBase(ModelBase):

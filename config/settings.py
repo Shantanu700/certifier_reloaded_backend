@@ -11,7 +11,6 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 import os
-
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -43,9 +42,35 @@ SESSION_COOKIE_SECURE = True
 
 ALLOWED_IMG_TYPES = {"jpeg": "image/jpeg", "jpg": "image/jpeg", "png": "image/png"}
 
-MAX_FILE_SIZE = 1048576
+MAX_FILE_SIZE = 10000000
 
 ALLOWED_CSV_TYPES = {"csv": "text/csv"}
+
+ALLOWED_PDF_TYPES = {"pdf": "application/pdf"}
+
+AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID")
+
+AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY")
+
+AWS_STORAGE_BUCKET_NAME = os.environ.get("AWS_STORAGE_BUCKET_NAME")
+
+AWS_S3_REGION_NAME = os.environ.get("AWS_S3_REGION_NAME", "ap-south-1")
+
+AWS_S3_ENDPOINT_URL = os.environ.get("AWS_S3_ENDPOINT_URL")
+
+AWS_S3_PRESIGNED_URL_EXPIRY = 3600
+
+CLOUDINARY_CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME")
+
+CLOUDINARY_API_KEY = os.environ.get("CLOUDINARY_API_KEY")
+
+CLOUDINARY_API_SECRET = os.environ.get("CLOUDINARY_API_SECRET")
+
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/1")
+
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/1")
+
+CELERY_TASK_SERIALIZER = "json"
 
 # Application definition
 
@@ -67,6 +92,7 @@ THIRD_PARTY_APPS = [
 
 LOCAL_APPS = [
     "modules.core",
+    "modules.certificates",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -107,14 +133,23 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("POSTGRES_DB"),
-        "USER": os.environ.get("POSTGRES_USER"),
-        "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-        "HOST": os.environ.get("POSTGRES_HOST"),
-        "PORT": os.environ.get("POSTGRES_PORT"),
+        "NAME": os.environ.get("PROD_POSTGRES_DB"),
+        "USER": os.environ.get("PROD_POSTGRES_USER"),
+        "PASSWORD": os.environ.get("PROD_POSTGRES_PASSWORD"),
+        "HOST": os.environ.get("PROD_POSTGRES_HOST"),
+        "PORT": os.environ.get("PROD_POSTGRES_PORT"),
         "ATOMIC_REQUESTS": True,
     }
 }
+
+
+# DATABASES = {
+#     "default": dj_database_url.parse(
+#         url=os.environ.get("DATABASE_URL"),
+#         engine="django.db.backends.postgresql",
+#         conn_max_age=600,
+#     )
+# }
 
 
 # Password validation
@@ -169,7 +204,7 @@ SPECTACULAR_SETTINGS = {
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "Asia/Kolkata"
 
 USE_I18N = True
 

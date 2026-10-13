@@ -65,36 +65,28 @@ class BaseSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         fields = super().to_representation(instance)
+        request = self.context.get("request")
         for field in self.file_fields:
             isStr = isinstance(field, str)
             field_name = field if isStr else field.get("name")
             if field_name in fields.keys():
-                fields[field_name] = (
-                    {
-                        "url": getattr(
-                            getattr(
-                                getattr_recursive(
-                                    instance, field if isStr else field.get("field")
-                                ),
-                                "file",
-                            ),
-                            "url",
-                        ),
-                        "uuid": getattr(
-                            getattr_recursive(
-                                instance, field if isStr else field.get("field")
-                            ),
-                            "uuid",
-                        ),
-                    }
-                    if getattr_recursive(
-                        instance, field if isStr else field.get("field")
-                    )
-                    else None
+                file_obj = getattr_recursive(
+                    instance, field if isStr else field.get("field")
                 )
+                if file_obj:
+                    url = file_obj.get_url()
+                    fields[field_name] = {
+                        "url": request.build_absolute_uri(url) if request else url,
+                        "uuid": file_obj.uuid,
+                    }
+                else:
+                    fields[field_name] = None
         return fields
 
 
 class FileObjectSerializer(serializers.Serializer):
-    url = serializers.CharField()
+    url = serializers.SerializerMethodField()
     uuid = serializers.CharField()
+
+    def get_url(self, obj) -> str:
+        return obj.get_url()

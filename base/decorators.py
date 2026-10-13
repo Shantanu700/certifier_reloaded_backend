@@ -1,6 +1,12 @@
 from typing import Any
 
-from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
+from drf_spectacular.utils import (
+    OpenApiExample,
+    OpenApiResponse,
+    extend_schema,
+    inline_serializer,
+)
+from rest_framework import serializers as drf_serializers
 from rest_framework.serializers import Serializer
 from rest_framework.settings import api_settings
 
@@ -15,12 +21,29 @@ from base.types import (
 )
 
 
-def extend_response(type: Any | None = None):
+def _paginated_type(type: Any):
+    """Wrap a serializer type in the count/next/previous/results envelope that
+    ``rest_framework.pagination.PageNumberPagination.get_paginated_response`` returns.
+    """
+    return inline_serializer(
+        name=f"Paginated{type.__class__.__name__}",
+        fields={
+            "count": drf_serializers.IntegerField(),
+            "next": drf_serializers.URLField(allow_null=True),
+            "previous": drf_serializers.URLField(allow_null=True),
+            "results": type.__class__(many=True),
+        },
+    )
+
+
+def extend_response(type: Any | None = None, paginated: bool = False):
     """
     Custom decorator to annotate BaseAPIView methods, in order to define the return type.
     Injects default status code with the return type.
 
     :param type: ReturnType of the method
+    :param paginated: set when the view returns `paginator.get_paginated_response(...)`,
+        so the schema documents the count/next/previous/results keys instead of the bare type.
     """
 
     def decorator(f):
@@ -30,10 +53,12 @@ def extend_response(type: Any | None = None):
             if default_response_code is None:
                 return f
 
+            response_type = _paginated_type(type) if paginated else type
+
             return extend_schema(
                 responses={
                     default_response_code: OpenApiResponse(
-                        type, description="Indicates that operation was successful."
+                        response_type, description="Indicates that operation was successful."
                     ),
                 }
             )(f)

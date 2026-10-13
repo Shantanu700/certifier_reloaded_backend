@@ -1,18 +1,42 @@
-from django.db import models
 from django.contrib.auth.models import AbstractUser
+from django.db import models
 
 from base.defaults import DEFAULT_ON_DELETE
+from base.enums import StorageProvider
 from base.manager import UserManager
 from base.model import DropdownBase, ModelBase
+from base.storage import get_storage_service
 
 
 # Create your models here.
-def upload_file(instance, filename: str):
-    return "uploads/{0}/{1}".format(instance.uuid, filename)
-
-
 class UploadFile(ModelBase):
-    file = models.FileField(upload_to=upload_file)
+    provider = models.CharField(max_length=20, choices=StorageProvider.choices, default=StorageProvider.LOCAL)
+    key = models.CharField(max_length=500)
+    url = models.URLField(max_length=1000, blank=True)
+    original_filename = models.CharField(max_length=255, blank=True, default="")
+    content_type = models.CharField(max_length=100, blank=True, default="")
+    size = models.PositiveIntegerField(default=0)
+
+    @classmethod
+    def upload(cls, file, provider: str, filename: str | None = None) -> "UploadFile":
+        "Server-side write path (Local, Cloudinary, and S3's export-zip task). Raises base.storage.StorageError on failure."
+        result = get_storage_service(provider).upload_file(file, filename=filename or getattr(file, "name", ""))
+        return cls.objects.create(
+            provider=result.provider,
+            key=result.key,
+            url=result.url,
+            original_filename=result.original_filename,
+            content_type=result.content_type,
+            size=result.size,
+        )
+
+    def open(self):
+        "Server-side read path. Raises base.storage.StorageError on failure."
+        return get_storage_service(self.provider).open_file(self)
+
+    def get_url(self) -> str:
+        "Client-facing URL -- fresh presigned GET for S3, stored value otherwise. Serializers use this, not `.url` directly."
+        return get_storage_service(self.provider).get_url(self)
 
 
 class MasterDropdown(DropdownBase):

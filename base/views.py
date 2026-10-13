@@ -1,17 +1,16 @@
 from typing import Any, cast
+
 from pydantic import BaseModel
 from rest_framework import status
-from rest_framework.views import APIView
 from rest_framework.request import Request
 from rest_framework.response import Response
-
+from rest_framework.views import APIView
 
 from base.constants import STATUS_MAPPING
 from base.decorators import extend_base_schema
 from base.exceptions import CustomError, PermissionException
 from base.permissions import APIAuthenticationPermission
 from base.types import AuthenticationMethodTypes
-
 
 # Write your views here
 
