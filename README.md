@@ -2,6 +2,8 @@
 
 Django + DRF API for certificate templates and batch certificate generation (rendered in Celery workers).
 
+Frontend: [certifier_reloaded_frontend](https://github.com/Shantanu700/certifier_reloaded_frontend)
+
 ## Requirements
 
 - Python 3.13 and [uv](https://docs.astral.sh/uv/)
