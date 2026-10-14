@@ -19,11 +19,13 @@ from base.exceptions import SerializerError
 from base.storage import StorageError, get_storage_service
 from base.views import BaseAV
 from modules.core.api.v1.serializers import (
+    GoogleAuthSerializer,
     LoginSerializer,
     PresignUploadRequestSerializer,
     PresignUploadResponseSerializer,
+    RegisterSerializer,
 )
-from modules.core.models import UploadFile
+from modules.core.models import UploadFile, User
 
 # Write your views here
 
@@ -93,6 +95,68 @@ class LoginAV(BaseAV):
             "msg": "Logout successful.",
         }
         return Response(response, status=status.HTTP_200_OK)
+
+
+class RegisterAV(BaseAV):
+    "Sign Up API View"
+
+    authentication = {
+        "post": False,
+    }
+
+    @extend_schema(request=RegisterSerializer)
+    @extend_response(LoginSerializer())
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if not serializer.is_valid():
+            raise SerializerError(serializer.errors)
+        user = serializer.save()
+        login(request, user)
+        return LoginSerializer(instance=user).data
+
+
+def _generate_username_from_email(email: str) -> str:
+    base = email.split("@")[0][:150]
+    username = base
+    suffix = 0
+    while User.objects.filter(username=username).exists():
+        suffix += 1
+        username = f"{base[:150 - len(str(suffix)) - 1]}-{suffix}"
+    return username
+
+
+class GoogleAuthAV(BaseAV):
+    "Google Login/Sign Up API View"
+
+    authentication = {
+        "post": False,
+    }
+
+    @extend_schema(request=GoogleAuthSerializer)
+    @extend_response(LoginSerializer())
+    def post(self, request):
+        serializer = GoogleAuthSerializer(data=request.data)
+        if not serializer.is_valid():
+            raise SerializerError(serializer.errors)
+        claims = serializer.validated_data["id_token"]
+
+        user = User.objects.filter(google_id=claims["sub"]).first()
+        if user is None:
+            # Registration doesn't verify email ownership, so linking Google to an
+            # existing account by email would let whoever registered that address first
+            # keep password access to the Google user's account.
+            if User.objects.filter(email__iexact=claims["email"]).exists():
+                self.fail("An account with this email already exists. Log in with your username and password.")
+            user = User.objects.create_user(
+                username=_generate_username_from_email(claims["email"]),
+                email=claims["email"],
+                name=claims.get("name", ""),
+                password=None,
+                google_id=claims["sub"],
+            )
+
+        login(request, user)
+        return LoginSerializer(instance=user).data
 
 
 class PresignUploadAV(BaseAV):

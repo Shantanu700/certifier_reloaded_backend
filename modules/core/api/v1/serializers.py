@@ -1,4 +1,7 @@
 from django.conf import settings
+from django.contrib.auth.password_validation import validate_password
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
 from rest_framework import serializers
 
 from base.serializers import BaseSerializer
@@ -24,7 +27,46 @@ class LoginSerializer(BaseSerializer):
 
     class Meta:
         model = User
-        exclude = User.USER_MODEL_FIELDS + ("password","gender")
+        exclude = User.USER_MODEL_FIELDS + ("password", "gender", "google_id")
+
+
+class RegisterSerializer(BaseSerializer):
+    password = serializers.CharField(write_only=True, style={"input_type": "password"})
+    email = serializers.EmailField()
+
+    class Meta:
+        model = User
+        fields = ("username", "name", "email", "password")
+
+    def validate_email(self, value):
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("An account with this email already exists.")
+        return value
+
+    def validate_password(self, value):
+        validate_password(value)
+        return value
+
+    def create(self, validated_data):
+        return User.objects.create_user(**validated_data)
+
+
+class GoogleAuthSerializer(serializers.Serializer):
+    id_token = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        try:
+            claims = google_id_token.verify_oauth2_token(
+                attrs["id_token"],
+                google_requests.Request(),
+                settings.GOOGLE_CLIENT_ID,
+            )
+        except ValueError:
+            raise serializers.ValidationError("Google sign-in failed. Please try again.")
+        if not claims.get("email_verified"):
+            raise serializers.ValidationError("Your Google email address is not verified.")
+        attrs["id_token"] = claims
+        return attrs
 
 
 class PresignUploadRequestSerializer(serializers.Serializer):

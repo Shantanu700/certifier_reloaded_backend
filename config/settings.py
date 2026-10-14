@@ -72,6 +72,9 @@ CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6
 
 CELERY_TASK_SERIALIZER = "json"
 
+# OAuth 2.0 Client ID from Google Cloud Console, used to verify Google ID tokens.
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+
 # Application definition
 
 DJANGO_APPS = [
