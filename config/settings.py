@@ -193,6 +193,9 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "0.1.0",
     "OPERATION_ID_METHOD_POSITION": "PRE",
     "SERVE_INCLUDE_SCHEMA": False,
+    # redoc@latest is 3.x, whose standalone bundle uses `import.meta` and throws a
+    # SyntaxError when loaded by drf-spectacular's classic <script> tag.
+    "REDOC_DIST": "https://cdn.jsdelivr.net/npm/redoc@2.5.4",
     "SWAGGER_UI_SETTINGS": {
         "defaultModelsExpandDepth": -1,
         "displayRequestDuration": True,
