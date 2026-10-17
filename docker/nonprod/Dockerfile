@@ -1,11 +1,10 @@
 FROM python:3.13-slim
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Pinned: an unpinned tag here invalidates every layer below whenever uv releases.
+COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /uvx /bin/
 
 ARG USER
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gdal-bin \
-    libgdal-dev \
     curl \
     ca-certificates \
     git \
@@ -25,15 +24,14 @@ RUN chmod -R g+w /usr/local/
 USER $USER
 
 ENV PATH="/home/$USER/.local/bin/:$PATH" \
-    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT="/usr/local/" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-COPY pyproject.toml .
-COPY uv.lock .
-RUN uv lock
-RUN uv sync --locked
+COPY pyproject.toml uv.lock ./
+# useradd gives the first user uid 1000
+RUN --mount=type=cache,target=/home/$USER/.cache/uv,uid=1000 uv sync --locked
 
 RUN sh -c "$(curl -L https://github.com/deluan/zsh-in-docker/releases/download/v1.2.1/zsh-in-docker.sh)" -- \
     -t robbyrussell \
