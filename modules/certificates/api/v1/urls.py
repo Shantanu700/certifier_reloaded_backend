@@ -2,6 +2,8 @@ from django.urls import path
 
 from modules.certificates.api.v1.views import (
     CertificateBatchAV,
+    CertificateTemplateCanvaImportAV,
+    CertificateTemplateCanvaSyncAV,
     CertificateTemplateAV,
     CertificateTemplateBoxAV,
     CertificateTemplateBoxDetailAV,
@@ -18,8 +20,16 @@ urlpatterns = [
         CertificateTemplateAV.as_view(),
     ),
     path(
+        "import-canva/",
+        CertificateTemplateCanvaImportAV.as_view(),
+    ),
+    path(
         "<uuid:uuid>/",
         CertificateTemplateDetailAV.as_view(),
+    ),
+    path(
+        "<uuid:uuid>/canva-sync/",
+        CertificateTemplateCanvaSyncAV.as_view(),
     ),
     path(
         "<uuid:template_uuid>/boxes/",

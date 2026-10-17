@@ -36,6 +36,12 @@ class CertificateTemplateUploadSerializer(serializers.Serializer):
     upload = serializers.UUIDField(help_text="uuid returned by POST core/upload-url/ after the file has been uploaded to S3.")
 
 
+class CanvaTemplateImportSerializer(serializers.Serializer):
+    design_id = serializers.CharField(max_length=100)
+    page = serializers.IntegerField(min_value=1, default=1, help_text="1-indexed page of the Canva design to use.")
+    name = serializers.CharField(max_length=255)
+
+
 class CertificateTemplateUpdateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255, required=False)
     upload = serializers.UUIDField(required=False, help_text="uuid returned by POST core/upload-url/ after the file has been uploaded to S3.")

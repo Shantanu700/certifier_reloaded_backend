@@ -54,6 +54,10 @@ urlpatterns = [
         "certificate-batches/",
         include("modules.certificates.api.v1.batch_urls"),
     ),
+    path(
+        "canva/",
+        include("modules.canva.api.v1.urls"),
+    ),
 ]
 
 if settings.DEBUG:

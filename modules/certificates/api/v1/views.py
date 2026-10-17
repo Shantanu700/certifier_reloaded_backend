@@ -1,7 +1,11 @@
 import csv
 
 from django.conf import settings
+from django.core.files.base import ContentFile
+from django.db import transaction
+from django.utils.decorators import method_decorator
 from drf_spectacular.utils import extend_schema
+from PIL import Image, UnidentifiedImageError
 from rest_framework.exceptions import NotFound
 
 from base.decorators import extend_response
@@ -12,8 +16,10 @@ from base.storage import StorageError, get_storage_service
 from base.types import DefaultSuccessResponseType
 from base.validators import validate_with_schema
 from base.views import BaseAV
+from modules.canva.services import CanvaError, CanvaService, ExportedImage
 from modules.certificates.api.v1.serializers import (
     ALLOWED_TEMPLATE_TYPES,
+    CanvaTemplateImportSerializer,
     CertificateBatchExportProgressSerializer,
     CertificateBatchMappingSerializer,
     CertificateBatchNamingSerializer,
@@ -149,6 +155,87 @@ class CertificateTemplateDetailAV(BaseAV):
         template.status = Status.DELETED
         template.save()
         return self.success("Certificate template deleted.")
+
+
+def store_canva_export(image: ExportedImage) -> UploadFile:
+    "Persist a Canva export the same place client uploads go (S3). The image was already validated by CanvaService."
+    file = ContentFile(image.content, name=image.filename)
+    file.content_type = image.content_type
+    try:
+        return UploadFile.upload(file, provider=StorageProvider.S3)
+    except StorageError as exc:
+        raise CustomError(str(exc))
+
+
+@method_decorator(transaction.non_atomic_requests, name="dispatch")
+class CertificateTemplateCanvaImportAV(BaseAV):
+    "Import one page of a Canva design as a new Certificate Template"
+
+    @extend_schema(request=CanvaTemplateImportSerializer)
+    @extend_response(CertificateTemplateSerializer())
+    def post(self, request):
+        serializer = CanvaTemplateImportSerializer(data=request.data)
+        if not serializer.is_valid():
+            raise SerializerError(serializer.errors)
+        data = serializer.validated_data
+
+        try:
+            image = CanvaService(request.user).export_design(data["design_id"], data["page"])
+        except CanvaError as exc:
+            self.fail(str(exc))
+
+        with transaction.atomic():
+            template = CertificateTemplate.objects.create(
+                name=data["name"],
+                file=store_canva_export(image),
+                owner=request.user,
+                canva_design_id=data["design_id"],
+                canva_page=data["page"],
+            )
+        return CertificateTemplateSerializer(instance=template, context={"request": request}).data
+
+
+@method_decorator(transaction.non_atomic_requests, name="dispatch")
+class CertificateTemplateCanvaSyncAV(BaseAV):
+    "Re-export a Canva-imported Certificate Template's design page and replace its file"
+
+    def get_object(self, request, uuid):
+        try:
+            return CertificateTemplate.objects.get(uuid=uuid, owner=request.user)
+        except CertificateTemplate.DoesNotExist:
+            raise NotFound("Certificate template not found.")
+
+    @extend_schema(request=None)
+    @extend_response(CertificateTemplateSerializer())
+    def post(self, request, uuid):
+        template = self.get_object(request, uuid)
+        if not template.canva_design_id:
+            self.fail("This template wasn't imported from Canva.")
+
+        try:
+            image = CanvaService(request.user).export_design(template.canva_design_id, template.canva_page or 1)
+        except CanvaError as exc:
+            self.fail(str(exc))
+
+        # Box coordinates are image pixels: a resized design would silently shift every box.
+        try:
+            with Image.open(template.file.open()) as current:
+                current_size = current.size
+        except (StorageError, UnidentifiedImageError, OSError):
+            current_size = None
+        if current_size and current_size != (image.width, image.height):
+            self.fail(
+                f"The Canva design is now {image.width}×{image.height}px but this template is "
+                f"{current_size[0]}×{current_size[1]}px, so its boxes would move. Import it as a new template instead."
+            )
+
+        with transaction.atomic():
+            previous_upload = template.file
+            template.file = store_canva_export(image)
+            template.save()
+            previous_upload.status = Status.DELETED
+            previous_upload.save()
+        return CertificateTemplateSerializer(instance=template, context={"request": request}).data
 
 
 class CertificateTemplateBoxAV(BaseAV):

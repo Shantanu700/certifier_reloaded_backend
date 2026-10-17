@@ -30,6 +30,9 @@ class CertificateTemplate(ModelBase):
         on_delete=DEFAULT_ON_DELETE,
         related_name="certificate_templates",
     )
+    # Set when the template was imported from Canva, so it can be re-synced from the same design page.
+    canva_design_id = models.CharField(max_length=100, blank=True, default="")
+    canva_page = models.PositiveIntegerField(null=True, blank=True)
 
 
 class TemplateBox(ModelBase):
