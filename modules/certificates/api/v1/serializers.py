@@ -6,6 +6,7 @@ from rest_framework import serializers
 
 from base.serializers import BaseSerializer
 from base.validators import validate_with_schema
+from modules.canva.services import EXPORT_WIDTH, MAX_EXPORT_WIDTH, MIN_EXPORT_WIDTH
 from modules.certificates.choices import CertificateBatchStatusChoices, TextAlignChoices
 from modules.certificates.fonts import BUNDLED_FONTS, DEFAULT_FONT
 from modules.certificates.models import (
@@ -40,6 +41,21 @@ class CanvaTemplateImportSerializer(serializers.Serializer):
     design_id = serializers.CharField(max_length=100)
     page = serializers.IntegerField(min_value=1, default=1, help_text="1-indexed page of the Canva design to use.")
     name = serializers.CharField(max_length=255)
+    width = serializers.IntegerField(
+        min_value=MIN_EXPORT_WIDTH,
+        max_value=MAX_EXPORT_WIDTH,
+        default=EXPORT_WIDTH,
+        help_text="Export width in pixels; the height follows the design's proportions.",
+    )
+
+
+class CanvaTemplateImportResultSerializer(serializers.Serializer):
+    template = CertificateTemplateSerializer()
+    width = serializers.IntegerField(help_text="Pixel width actually imported.")
+    height = serializers.IntegerField()
+    downscaled = serializers.BooleanField(
+        help_text="Canva wouldn't export at the requested width (e.g. its Free-plan upscale limit), so the design's own size was used."
+    )
 
 
 class CertificateTemplateUpdateSerializer(serializers.Serializer):

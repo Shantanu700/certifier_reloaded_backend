@@ -118,11 +118,12 @@ class CanvaServiceTests(TestCase):
         ]
         self.service.http.get.return_value = fake_response(content=png_bytes())
 
-        self.service.export_design("DAF123", page=1)
+        image = self.service.export_design("DAF123", page=1, width=3000)
 
         sized, native = (c.kwargs["json"]["format"] for c in self.service.http.request.call_args_list)
-        self.assertEqual(sized["width"], services.EXPORT_WIDTH)
+        self.assertEqual(sized["width"], 3000)
         self.assertNotIn("width", native)
+        self.assertTrue(image.downscaled)
 
     def test_failed_export_surfaces_canva_reason_without_native_retry(self):
         self.connect_with(expires_in_seconds=3600)

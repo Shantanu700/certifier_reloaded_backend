@@ -19,6 +19,7 @@ from base.views import BaseAV
 from modules.canva.services import EXPORT_WIDTH, CanvaError, CanvaService, ExportedImage
 from modules.certificates.api.v1.serializers import (
     ALLOWED_TEMPLATE_TYPES,
+    CanvaTemplateImportResultSerializer,
     CanvaTemplateImportSerializer,
     CertificateBatchExportProgressSerializer,
     CertificateBatchMappingSerializer,
@@ -172,7 +173,7 @@ class CertificateTemplateCanvaImportAV(BaseAV):
     "Import one page of a Canva design as a new Certificate Template"
 
     @extend_schema(request=CanvaTemplateImportSerializer)
-    @extend_response(CertificateTemplateSerializer())
+    @extend_response(CanvaTemplateImportResultSerializer())
     def post(self, request):
         serializer = CanvaTemplateImportSerializer(data=request.data)
         if not serializer.is_valid():
@@ -180,7 +181,7 @@ class CertificateTemplateCanvaImportAV(BaseAV):
         data = serializer.validated_data
 
         try:
-            image = CanvaService(request.user).export_design(data["design_id"], data["page"])
+            image = CanvaService(request.user).export_design(data["design_id"], data["page"], width=data["width"])
         except CanvaError as exc:
             self.fail(str(exc))
 
@@ -192,7 +193,12 @@ class CertificateTemplateCanvaImportAV(BaseAV):
                 canva_design_id=data["design_id"],
                 canva_page=data["page"],
             )
-        return CertificateTemplateSerializer(instance=template, context={"request": request}).data
+        return {
+            "template": CertificateTemplateSerializer(instance=template, context={"request": request}).data,
+            "width": image.width,
+            "height": image.height,
+            "downscaled": image.downscaled,
+        }
 
 
 @method_decorator(transaction.non_atomic_requests, name="dispatch")
