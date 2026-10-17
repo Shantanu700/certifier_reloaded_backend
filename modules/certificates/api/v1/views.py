@@ -4,7 +4,8 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils.decorators import method_decorator
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from PIL import Image, UnidentifiedImageError
 from rest_framework.exceptions import NotFound
 
@@ -79,12 +80,26 @@ def confirm_s3_upload(upload_uuid, allowed_types: dict[str, str], max_size: int)
 class CertificateTemplateAV(BaseAV):
     "List & Upload Certificate Templates"
 
-    @extend_schema(operation_id="list_certificate_templates")
+    @extend_schema(
+        operation_id="list_certificate_templates",
+        parameters=[
+            OpenApiParameter("search", OpenApiTypes.STR, description="Case-insensitive match on the template name."),
+            OpenApiParameter("page", OpenApiTypes.INT, description="1-indexed page number."),
+            OpenApiParameter(
+                "page_size",
+                OpenApiTypes.INT,
+                description=f"Templates per page (default {DefaultPagination.page_size}, max {DefaultPagination.max_page_size}).",
+            ),
+        ],
+    )
     @extend_response(CertificateTemplateSerializer(), paginated=True)
     def get(self, request):
         queryset = CertificateTemplate.objects.filter(owner=request.user).order_by(
             "-created_at"
         )
+        search = request.query_params.get("search", "").strip()[:255]
+        if search:
+            queryset = queryset.filter(name__icontains=search)
         paginator = DefaultPagination()
         page = paginator.paginate_queryset(queryset, request)
         serializer = CertificateTemplateSerializer(
