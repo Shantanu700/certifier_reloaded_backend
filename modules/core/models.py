@@ -63,6 +63,7 @@ class User(ModelBase, AbstractUser):
         max_length=255,
     )
     email = models.EmailField(null=True)
+    google_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
     profile_image = models.ForeignKey(
         UploadFile,
         on_delete=DEFAULT_ON_DELETE,

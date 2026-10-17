@@ -65,7 +65,7 @@ All models inherit `ModelBase`: `uuid` (uuid6), `status`, `created_at`, `updated
 
 ### Current module inventory
 
-`modules/` currently contains only `core`. Its only live endpoint is `core/login/` (`LoginAV`). `DropDownSerializer` exists in `modules/core/api/v1/serializers.py` but has no corresponding view or URL — don't assume dropdown CRUD exists.
+`core` endpoints: `core/login/` (`LoginAV`), `core/register/` (`RegisterAV`, logs the new user in), `core/google/` (`GoogleAuthAV`: verifies a Google ID token against `GOOGLE_CLIENT_ID`, creates or reuses the user by `google_id`, and refuses to auto-link to an existing account with the same email) and `core/upload-url/` (`PresignUploadAV`). `DropDownSerializer` exists in `modules/core/api/v1/serializers.py` but has no corresponding view or URL — don't assume dropdown CRUD exists.
 
 ### Notable settings (`config/settings.py`)
 
