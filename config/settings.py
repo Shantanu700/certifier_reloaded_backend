@@ -75,6 +75,14 @@ CELERY_TASK_SERIALIZER = "json"
 # OAuth 2.0 Client ID from Google Cloud Console, used to verify Google ID tokens.
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 
+# Canva Connect integration (Developer Portal -> Your integrations) used to import designs as templates.
+CANVA_CLIENT_ID = os.environ.get("CANVA_CLIENT_ID", "")
+CANVA_CLIENT_SECRET = os.environ.get("CANVA_CLIENT_SECRET", "")
+# Must exactly match a redirect URL registered on the integration; it's the frontend's /canva/callback route.
+CANVA_REDIRECT_URI = os.environ.get("CANVA_REDIRECT_URI", "")
+# Fernet key that encrypts stored Canva tokens. Rotating it disconnects every user's Canva account.
+CANVA_TOKEN_KEY = os.environ.get("CANVA_TOKEN_KEY", "")
+
 # Application definition
 
 DJANGO_APPS = [
@@ -96,6 +104,7 @@ THIRD_PARTY_APPS = [
 LOCAL_APPS = [
     "modules.core",
     "modules.certificates",
+    "modules.canva",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

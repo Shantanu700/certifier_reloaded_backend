@@ -8,6 +8,7 @@ dependencies = [
     "boto3>=1.34",
     "celery>=5.6.3",
     "cloudinary>=1.41",
+    "cryptography>=50.0.2",
     "django>=6.0.3",
     "django-cors-headers>=4.9.0",
     "django-sslserver-v2>=1.0",
@@ -20,5 +21,6 @@ dependencies = [
     "pymupdf>=1.28.2",
     "python-dotenv>=1.2.2",
     "redis>=8.1.0",
+    "requests>=2.34.2",
     "uuid6>=2025.0.1",
 ]
