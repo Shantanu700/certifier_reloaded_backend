@@ -17,6 +17,7 @@ from base.decorators import extend_response
 from base.enums import StorageProvider
 from base.exceptions import SerializerError
 from base.storage import StorageError, get_storage_service
+from base.types import DefaultSuccessResponseType
 from base.views import BaseAV
 from modules.core.api.v1.serializers import (
     GoogleAuthSerializer,
@@ -56,6 +57,7 @@ class LoginAV(BaseAV):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
+        request=None,
         parameters=[
             OpenApiParameter(
                 name="Authorization",
@@ -89,6 +91,7 @@ class LoginAV(BaseAV):
         }
         return Response(response, status=status.HTTP_400_BAD_REQUEST)
 
+    @extend_response(DefaultSuccessResponseType)
     def delete(self, request):
         logout(request)
         response = {
