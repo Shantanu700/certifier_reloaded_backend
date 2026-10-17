@@ -9,6 +9,7 @@ from base.enums import Status, StorageProvider
 from base.exceptions import CustomError, SerializerError
 from base.pagination import DefaultPagination
 from base.storage import StorageError, get_storage_service
+from base.types import DefaultSuccessResponseType
 from base.validators import validate_with_schema
 from base.views import BaseAV
 from modules.certificates.api.v1.serializers import (
@@ -142,6 +143,7 @@ class CertificateTemplateDetailAV(BaseAV):
             instance=template, context={"request": request}
         ).data
 
+    @extend_response(DefaultSuccessResponseType)
     def delete(self, request, uuid):
         template = self.get_object(request, uuid)
         template.status = Status.DELETED
@@ -206,6 +208,7 @@ class CertificateTemplateBoxDetailAV(BaseAV):
         box.save()
         return TemplateBoxSerializer(instance=box, context={"request": request}).data
 
+    @extend_response(DefaultSuccessResponseType)
     def delete(self, request, template_uuid, uuid):
         box = self.get_object(request, template_uuid, uuid)
         box.status = Status.DELETED
@@ -281,6 +284,7 @@ class CertificateTemplateImageBoxDetailAV(BaseAV):
         image_box.save()
         return TemplateImageBoxSerializer(instance=image_box, context={"request": request}).data
 
+    @extend_response(DefaultSuccessResponseType)
     def delete(self, request, template_uuid, uuid):
         image_box = self.get_object(request, template_uuid, uuid)
         image_box.status = Status.DELETED
@@ -348,6 +352,7 @@ class CertificateBatchDetailAV(BaseAV):
     def get(self, request, uuid):
         return CertificateBatchSerializer(instance=self.get_object(request, uuid), context={"request": request}).data
 
+    @extend_response(DefaultSuccessResponseType)
     def delete(self, request, uuid):
         batch = self.get_object(request, uuid)
         batch.status = Status.DELETED
@@ -442,6 +447,7 @@ class CertificateBatchGenerateAV(BaseAV):
         except CertificateBatch.DoesNotExist:
             raise NotFound("Certificate batch not found.")
 
+    @extend_schema(request=None)
     @extend_response(CertificateBatchSerializer())
     def post(self, request, uuid):
         batch = self.get_object(request, uuid)
@@ -472,6 +478,7 @@ class CertificateBatchExportAV(BaseAV):
         except CertificateBatch.DoesNotExist:
             raise NotFound("Certificate batch not found.")
 
+    @extend_schema(request=None)
     @extend_response(CertificateBatchSerializer())
     def post(self, request, uuid):
         batch = self.get_object(request, uuid)

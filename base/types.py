@@ -47,11 +47,11 @@ class FileFieldType(TypedDict):
 
 
 class UnAuthenticatedResponseType(BaseModel):
-    msg: Literal["You are unauthenticated! Please login again!"]
+    msg: str
 
 
 class UnAuthorizedResponseType(BaseModel):
-    msg: Literal["You are not authorized to access this page!"]
+    msg: str
 
 
 class CustomErrorResponseType(BaseModel):
