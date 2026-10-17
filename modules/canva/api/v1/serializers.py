@@ -20,6 +20,8 @@ class CanvaDesignSerializer(serializers.Serializer):
     id = serializers.CharField()
     title = serializers.CharField()
     thumbnail_url = serializers.URLField(allow_null=True, help_text="Expires after 15 minutes; don't cache it.")
+    thumbnail_width = serializers.IntegerField(allow_null=True, help_text="Same proportions as the design; use it for the aspect ratio.")
+    thumbnail_height = serializers.IntegerField(allow_null=True)
     page_count = serializers.IntegerField(allow_null=True)
     updated_at = serializers.IntegerField(allow_null=True, help_text="Unix timestamp (seconds).")
 
