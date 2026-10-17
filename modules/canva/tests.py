@@ -103,18 +103,35 @@ class CanvaServiceTests(TestCase):
 
         image = self.service.export_design("DAF123", page=2)
 
-        create_call = self.service.http.request.call_args_list[0]
-        self.assertEqual(create_call.kwargs["json"]["format"]["pages"], [2])
+        export_format = self.service.http.request.call_args_list[0].kwargs["json"]["format"]
+        self.assertEqual(export_format["pages"], [2])
+        self.assertEqual(export_format["width"], services.EXPORT_WIDTH)
         self.assertEqual((image.width, image.height, image.content_type), (40, 30, "image/png"))
         self.assertTrue(image.filename.endswith(".png"))
 
-    def test_failed_export_surfaces_canva_reason(self):
+    def test_failed_sized_export_falls_back_to_native_size(self):
+        "Free-plan accounts can't upscale past 1.125x; the import should still succeed at Canva's own size."
+        self.connect_with(expires_in_seconds=3600)
+        self.service.http.request.side_effect = [
+            fake_response(body={"job": {"id": "job-1", "status": "failed", "error": {"code": "invalid_size", "message": "x"}}}),
+            fake_response(body={"job": {"id": "job-2", "status": "success", "urls": ["https://export-download.canva.com/x"]}}),
+        ]
+        self.service.http.get.return_value = fake_response(content=png_bytes())
+
+        self.service.export_design("DAF123", page=1)
+
+        sized, native = (c.kwargs["json"]["format"] for c in self.service.http.request.call_args_list)
+        self.assertEqual(sized["width"], services.EXPORT_WIDTH)
+        self.assertNotIn("width", native)
+
+    def test_failed_export_surfaces_canva_reason_without_native_retry(self):
         self.connect_with(expires_in_seconds=3600)
         self.service.http.request.return_value = fake_response(
             body={"job": {"id": "job-1", "status": "failed", "error": {"code": "license_required", "message": "x"}}}
         )
         with self.assertRaisesMessage(CanvaError, services.ERROR_MESSAGES["license_required"]):
             self.service.export_design("DAF123", page=1)
+        self.assertEqual(self.service.http.request.call_count, 1)
 
     @mock.patch.object(services, "EXPORT_TIMEOUT", -1)
     def test_export_times_out(self):

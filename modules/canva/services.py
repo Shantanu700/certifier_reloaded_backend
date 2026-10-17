@@ -27,6 +27,11 @@ EXPORT_POLL_INTERVAL = 1
 EXPORT_TIMEOUT = 45
 MAX_DOWNLOAD_SIZE = 50_000_000  # hard cap while streaming; the PNG -> JPG fallback still has to land under MAX_FILE_SIZE
 DESIGNS_PAGE_SIZE = 24
+# Canva exports at the design's own 96 DPI size by default (1123x794 for A4), which prints soft.
+# 2480px is ~300 DPI across A4 portrait and ~2.2x native for A4 landscape.
+EXPORT_WIDTH = 2480
+# Failures a smaller native-size export can't fix, so don't spend a second export on them.
+NO_NATIVE_RETRY = {"license_required", "approval_required", "permission_denied", "not_found", "too_many_requests", "timeout"}
 
 ERROR_MESSAGES = {
     "license_required": "This design uses premium Canva elements your account isn't licensed to export.",
@@ -39,7 +44,11 @@ RECONNECT_MESSAGE = "Your Canva connection has expired. Connect Canva again."
 
 
 class CanvaError(Exception):
-    "Raised for any Canva failure; the message is safe to show the user."
+    "Raised for any Canva failure; the message is safe to show the user. `code` is Canva's error code when there is one."
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 class CanvaTokenRejected(CanvaError):
@@ -165,12 +174,24 @@ class CanvaService:
             continuation=data.get("continuation"),
         )
 
-    def export_design(self, design_id: str, page: int) -> ExportedImage:
-        "One page as an image template. PNG keeps text crisp; fall back to JPG when the PNG is over MAX_FILE_SIZE."
-        content = self._export(design_id, page, {"type": "png"})
+    def export_design(self, design_id: str, page: int, width: int | None = EXPORT_WIDTH) -> ExportedImage:
+        """
+        One page as an image template, `width` pixels wide (aspect ratio kept; None = Canva's native size).
+        PNG keeps text crisp; fall back to JPG when the PNG is over MAX_FILE_SIZE.
+        """
+        size = {"width": width} if width else {}
+        try:
+            content = self._export(design_id, page, {"type": "png", **size})
+        except CanvaError as exc:
+            if not size or exc.code in NO_NATIVE_RETRY:
+                raise
+            # ponytail: assumes a failed sized export is the Free-plan 1.125x upscale cap and settles for
+            # Canva's native size rather than failing the import; surface the lower quality if users ask.
+            size = {}
+            content = self._export(design_id, page, {"type": "png"})
         content_type, extension, pil_format = "image/png", "png", "PNG"
         if len(content) > settings.MAX_FILE_SIZE:
-            content = self._export(design_id, page, {"type": "jpg", "quality": 90})
+            content = self._export(design_id, page, {"type": "jpg", "quality": 90, **size})
             content_type, extension, pil_format = "image/jpeg", "jpg", "JPEG"
         if len(content) > settings.MAX_FILE_SIZE:
             raise CanvaError(f"This design exports larger than {settings.MAX_FILE_SIZE // 1_000_000} MB even as JPG. Simplify it in Canva and try again.")
@@ -203,13 +224,16 @@ class CanvaService:
         deadline = time.monotonic() + EXPORT_TIMEOUT
         while job["status"] == "in_progress":
             if time.monotonic() > deadline:
-                raise CanvaError("Canva is taking too long to export this design. Try again in a minute.")
+                raise CanvaError("Canva is taking too long to export this design. Try again in a minute.", code="timeout")
             time.sleep(EXPORT_POLL_INTERVAL)
             job = self._request("GET", f"/exports/{job['id']}")["job"]
 
         if job["status"] != "success":
             error = job.get("error") or {}
-            raise CanvaError(ERROR_MESSAGES.get(error.get("code"), f"Canva couldn't export this design: {error.get('message', 'unknown error')}."))
+            raise CanvaError(
+                ERROR_MESSAGES.get(error.get("code"), f"Canva couldn't export this design: {error.get('message', 'unknown error')}."),
+                code=error.get("code"),
+            )
         if not job.get("urls"):
             raise CanvaError("Canva didn't return the exported page. Check the page number and try again.")
         return self._download(job["urls"][0])
@@ -246,7 +270,7 @@ class CanvaService:
                 self._drop(connection)
             raise CanvaError(RECONNECT_MESSAGE)
         if not response.ok:
-            raise CanvaError(self._message_from(response))
+            raise self._error_from(response)
         return response.json()
 
     def _access_token(self) -> str:
@@ -284,9 +308,9 @@ class CanvaService:
         except requests.RequestException as exc:
             raise CanvaError("Couldn't reach Canva. Try again.") from exc
         if response.status_code in (400, 401):
-            raise CanvaTokenRejected(self._message_from(response))
+            raise self._error_from(response, CanvaTokenRejected)
         if not response.ok:
-            raise CanvaError(self._message_from(response))
+            raise self._error_from(response)
         return response.json()
 
     def _store_tokens(self, connection: CanvaConnection, tokens: dict) -> None:
@@ -315,10 +339,13 @@ class CanvaService:
             raise CanvaError(RECONNECT_MESSAGE) from exc
 
     @staticmethod
-    def _message_from(response) -> str:
+    def _error_from(response, error_class: type[CanvaError] = CanvaError) -> CanvaError:
         try:
             body = response.json()
         except ValueError:
             body = {}
         code = body.get("code") or body.get("error")
-        return ERROR_MESSAGES.get(code, f"Canva returned an error: {body.get('message') or body.get('error_description') or response.status_code}.")
+        message = ERROR_MESSAGES.get(
+            code, f"Canva returned an error: {body.get('message') or body.get('error_description') or response.status_code}."
+        )
+        return error_class(message, code=code)

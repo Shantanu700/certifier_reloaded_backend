@@ -16,7 +16,7 @@ from base.storage import StorageError, get_storage_service
 from base.types import DefaultSuccessResponseType
 from base.validators import validate_with_schema
 from base.views import BaseAV
-from modules.canva.services import CanvaError, CanvaService, ExportedImage
+from modules.canva.services import EXPORT_WIDTH, CanvaError, CanvaService, ExportedImage
 from modules.certificates.api.v1.serializers import (
     ALLOWED_TEMPLATE_TYPES,
     CanvaTemplateImportSerializer,
@@ -212,20 +212,28 @@ class CertificateTemplateCanvaSyncAV(BaseAV):
         if not template.canva_design_id:
             self.fail("This template wasn't imported from Canva.")
 
+        # Box coordinates are image pixels. With boxes placed, re-export at the current width and insist on the
+        # same size, or every box would shift. Without boxes, nothing can shift: take the full EXPORT_WIDTH.
+        current_size = None
+        if template.boxes.exists() or template.image_boxes.exists():
+            try:
+                with Image.open(template.file.open()) as current:
+                    current_size = current.size
+            except (StorageError, UnidentifiedImageError, OSError):
+                self.fail("Couldn't read the current template file to check its size, so its boxes might move.")
+
         try:
-            image = CanvaService(request.user).export_design(template.canva_design_id, template.canva_page or 1)
+            image = CanvaService(request.user).export_design(
+                template.canva_design_id,
+                template.canva_page or 1,
+                width=current_size[0] if current_size else EXPORT_WIDTH,
+            )
         except CanvaError as exc:
             self.fail(str(exc))
 
-        # Box coordinates are image pixels: a resized design would silently shift every box.
-        try:
-            with Image.open(template.file.open()) as current:
-                current_size = current.size
-        except (StorageError, UnidentifiedImageError, OSError):
-            current_size = None
         if current_size and current_size != (image.width, image.height):
             self.fail(
-                f"The Canva design is now {image.width}×{image.height}px but this template is "
+                f"The Canva design now exports at {image.width}×{image.height}px but this template is "
                 f"{current_size[0]}×{current_size[1]}px, so its boxes would move. Import it as a new template instead."
             )
 
