@@ -1,11 +1,14 @@
 from datetime import date
 from unittest import mock
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from PIL import Image
 from rest_framework.test import APIClient
 
 from modules.certificates.models import CertificateBatch, CertificateTemplate, GeneratedCertificate, TemplateBox
+from modules.certificates.rendering import box_values, draw_qr, generate_certificate_for_row
 from modules.certificates.services import IssuanceError, IssuanceService
+from modules.certificates.verification import format_code, new_code, normalise_code
 from modules.core.models import UploadFile, User
 
 
@@ -13,7 +16,7 @@ def upload(name="file.png"):
     return UploadFile.objects.create(key=name, url=f"https://files.example.com/{name}", original_filename=name)
 
 
-def fake_render(batch, index, row, boxes, image_boxes):
+def fake_render(batch, index, row, boxes, image_boxes, code):
     return upload(f"certificate_{index}.png"), []
 
 
@@ -150,3 +153,81 @@ class IssuanceTests(TestCase):
         self.assertNotIn("phone", ready[0]["recipient"])
         bad = client.post(f"/certificate-batches/{self.batch.uuid}/match/", {"match_fields": {"roll_number": "Nope"}}, format="json")
         self.assertEqual(bad.status_code, 409)
+
+    def test_public_verify_shows_only_issued_details(self):
+        self.asha.name = "Asha Sample"
+        self.asha.save()
+        cert = self.certs[0]
+        cert.recipient, cert.verification_code = self.asha, "7KQ2M9XD4TFA"
+        cert.save()
+        url = "/certificates/verify/7kq2-m9xd-4tfa/"
+
+        self.assertEqual(APIClient().get(url).status_code, 409)  # still a draft
+        self.service.issue()
+        response = APIClient().get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {k: response.json()[k] for k in ("code", "issue_status", "recipient_name", "template_name")},
+            {"code": "7KQ2-M9XD-4TFA", "issue_status": "issued", "recipient_name": "Asha Sample", "template_name": "Workshop"},
+        )
+        self.assertNotIn("row_data", response.json())
+
+        self.service.revoke()
+        self.assertEqual(APIClient().get(url).json()["issue_status"], "revoked")
+        self.assertEqual(APIClient().get("/certificates/verify/nonsense/").status_code, 409)
+
+    def test_mapping_rejects_verify_boxes(self):
+        TemplateBox.objects.create(template=self.batch.template, key="code", type="verify_code", x=0, y=0, width=10, height=10)
+        response = self.client_for(self.issuer).put(
+            f"/certificate-batches/{self.batch.uuid}/mapping/", {"mapping": {"code": "Name"}}, format="json"
+        )
+        self.assertEqual(response.status_code, 409)
+
+    def test_generation_and_issue_one_save_a_code(self):
+        with mock.patch("modules.certificates.rendering.render_file", fake_render):
+            cert = generate_certificate_for_row(self.batch, 20, {"Name": "New"}, [], [])
+        self.assertEqual(len(cert.verification_code), 12)
+        TemplateBox.objects.create(template=self.batch.template, key="code", type="verify_code", x=0, y=0, width=10, height=10)
+        manual = IssuanceService.for_manual(self.batch.template).issue_one("asha", {"name": "Asha"})
+        self.assertEqual(len(manual.verification_code), 12)
+        self.assertEqual(manual.row_data, {"name": "Asha"})
+
+
+class VerificationCodeTests(TestCase):
+    def test_codes_survive_formatting_and_common_typos(self):
+        code = new_code()
+        self.assertEqual(len(code), 12)
+        self.assertEqual(normalise_code(format_code(code)), code)
+        self.assertEqual(normalise_code(" 7kq2-m9xd 4tfa "), "7KQ2M9XD4TFA")
+        self.assertEqual(normalise_code("OIL0-0000-0000"), "0110" + "0" * 8)
+        self.assertIsNone(normalise_code("7KQ2-M9XD"))
+        self.assertIsNone(normalise_code("7KQ2-M9XD-4TF!"))
+
+    @override_settings(FRONTEND_URL="https://app.example.com")
+    def test_box_values_fill_verify_boxes_from_the_code(self):
+        batch = CertificateBatch(mapping={"name": "Name", "link": "Link"})
+        boxes = [
+            TemplateBox(key="name"),
+            TemplateBox(key="link", type="qr"),
+            TemplateBox(key="code", type="verify_code"),
+            TemplateBox(key="scan", type="verify_qr"),
+        ]
+        values = box_values(batch, {"Name": "Asha", "Link": "https://example.com/a"}, boxes, "7KQ2M9XD4TFA")
+        self.assertEqual(
+            values,
+            {
+                "name": "Asha",
+                "link": "https://example.com/a",
+                "code": "7KQ2-M9XD-4TFA",
+                "scan": "https://app.example.com/verify?code=7KQ2-M9XD-4TFA",
+            },
+        )
+
+    def test_draw_qr_paints_inside_its_box_only(self):
+        image = Image.new("RGB", (200, 200), "white")
+        box = TemplateBox(key="scan", type="qr", x=50, y=50, width=100, height=100, font_color="#ff0000")
+        self.assertIsNone(draw_qr(image, box, "https://example.com"))
+        inside = image.crop((50, 50, 150, 150)).getcolors()
+        self.assertIn((255, 0, 0), [colour for _, colour in inside])
+        self.assertEqual(image.crop((0, 0, 50, 200)).getcolors(), [(50 * 200, (255, 255, 255))])
+        self.assertIsNotNone(draw_qr(image, TemplateBox(key="tiny", x=0, y=0, width=5, height=5), "x" * 50))

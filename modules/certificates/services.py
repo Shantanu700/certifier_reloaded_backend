@@ -5,9 +5,10 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from base.enums import RoleEnum, Status
-from modules.certificates.choices import CertificateBatchStatusChoices, IssueStatusChoices
+from modules.certificates.choices import MAPPABLE_BOX_TYPES, CertificateBatchStatusChoices, IssueStatusChoices
 from modules.certificates.models import CertificateBatch, GeneratedCertificate
 from modules.certificates.rendering import load_prepared_image_box, render_file
+from modules.certificates.verification import new_code
 from modules.core.models import User
 
 # Recipient fields a CSV column can be matched against.
@@ -161,7 +162,7 @@ class IssuanceService:
         if certificate.issue_status == IssueStatusChoices.REVOKED:
             raise IssuanceError("A revoked certificate can't be changed.")
         boxes = self._boxes()
-        unknown = set(values) - {box.key for box in boxes}
+        unknown = set(values) - {box.key for box in boxes if box.type in MAPPABLE_BOX_TYPES}
         if unknown:
             raise IssuanceError(f"Unknown box key(s): {', '.join(sorted(unknown))}.")
         unmapped = sorted(key for key in values if not self.batch.mapping.get(key))
@@ -172,7 +173,8 @@ class IssuanceService:
         for key, value in values.items():
             row[self.batch.mapping[key]] = value
         previous = certificate.file
-        certificate.file, warnings = self._render(certificate.row_index, row, boxes)
+        certificate.verification_code = certificate.verification_code or new_code()  # older certificates have none
+        certificate.file, warnings = self._render(certificate.row_index, row, boxes, certificate.verification_code)
         certificate.row_data = row
         certificate.is_successful = True
         certificate.error_message = "; ".join(warnings)
@@ -198,14 +200,16 @@ class IssuanceService:
         "Render a single certificate from typed values and issue it straight away (manual batch only)."
         recipient = find_recipient(identifier)
         boxes = self._boxes()
-        unknown = set(values) - {box.key for box in boxes}
+        mappable = [box for box in boxes if box.type in MAPPABLE_BOX_TYPES]
+        unknown = set(values) - {box.key for box in mappable}
         if unknown:
             raise IssuanceError(f"Unknown box key(s): {', '.join(sorted(unknown))}.")
-        row = {box.key: values.get(box.key, "") for box in boxes}
+        row = {box.key: values.get(box.key, "") for box in mappable}
 
         batch = CertificateBatch.objects.select_for_update().get(pk=self.batch.pk)  # serialises row_index
         index = batch.total_rows
-        upload, warnings = self._render(index, row, boxes)
+        code = new_code()
+        upload, warnings = self._render(index, row, boxes, code)
         certificate = GeneratedCertificate.objects.create(
             batch=batch,
             row_index=index,
@@ -216,6 +220,7 @@ class IssuanceService:
             recipient=recipient,
             issue_status=IssueStatusChoices.ISSUED,
             issued_at=timezone.now(),
+            verification_code=code,
         )
         batch.total_rows = batch.processed_rows = index + 1
         batch.save(update_fields=["total_rows", "processed_rows"])
@@ -227,14 +232,14 @@ class IssuanceService:
             # A manual row is keyed by box key, so its mapping is the identity over the template's current boxes.
             if not boxes:
                 raise IssuanceError("Add a text box to the template first.")
-            self.batch.mapping = {box.key: box.key for box in boxes}
+            self.batch.mapping = {box.key: box.key for box in boxes if box.type in MAPPABLE_BOX_TYPES}
             self.batch.csv_columns = list(self.batch.mapping)
             self.batch.save(update_fields=["mapping", "csv_columns"])
         return boxes
 
-    def _render(self, index: int, row: dict, boxes):
+    def _render(self, index: int, row: dict, boxes, code: str):
         try:
             image_boxes = [load_prepared_image_box(box) for box in self.batch.template.image_boxes.all()]
-            return render_file(self.batch, index, row, boxes, image_boxes)
+            return render_file(self.batch, index, row, boxes, image_boxes, code)
         except Exception as exc:
             raise IssuanceError(f"Couldn't render the certificate: {exc}") from exc

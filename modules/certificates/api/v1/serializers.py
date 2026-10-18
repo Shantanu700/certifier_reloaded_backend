@@ -7,7 +7,7 @@ from rest_framework import serializers
 from base.serializers import BaseSerializer
 from base.validators import validate_with_schema
 from modules.canva.services import EXPORT_WIDTH, MAX_EXPORT_WIDTH, MIN_EXPORT_WIDTH
-from modules.certificates.choices import CertificateBatchStatusChoices, IssueStatusChoices, TextAlignChoices
+from modules.certificates.choices import BoxTypeChoices, CertificateBatchStatusChoices, IssueStatusChoices, TextAlignChoices
 from modules.certificates.fonts import BUNDLED_FONTS, DEFAULT_FONT
 from modules.certificates.models import (
     CertificateBatch,
@@ -18,6 +18,7 @@ from modules.certificates.models import (
 )
 from modules.certificates.schemas import BoxMappingSchema, NamingConventionSchema
 from modules.certificates.services import MATCH_FIELDS
+from modules.certificates.verification import format_code
 from modules.core.models import User
 
 # Write your serializers here
@@ -96,6 +97,7 @@ class TemplateBoxCreateSerializer(serializers.Serializer):
         required=False,
         default=TextAlignChoices.CENTER,
     )
+    type = serializers.ChoiceField(choices=BoxTypeChoices.choices, required=False, default=BoxTypeChoices.TEXT)
 
     def validate_font_color(self, value):
         return _validate_font_color(value)
@@ -117,6 +119,7 @@ class TemplateBoxUpdateSerializer(serializers.Serializer):
     font_size = serializers.IntegerField(min_value=1, required=False)
     font_color = serializers.CharField(required=False)
     alignment = serializers.ChoiceField(choices=TextAlignChoices.choices, required=False)
+    type = serializers.ChoiceField(choices=BoxTypeChoices.choices, required=False)
 
     def validate_font_color(self, value):
         return _validate_font_color(value)
@@ -335,3 +338,21 @@ class ReceivedCertificateSerializer(BaseSerializer):
             data["file"] = None  # revoked: no download
         return data
 
+
+
+class VerifiedCertificateSerializer(BaseSerializer):
+    "What anyone holding the code sees -- no CSV row, file or contact details."
+
+    code = serializers.SerializerMethodField()
+    dynamic_keys = [  # noqa: RUF012
+        {"name": "template_name", "source": "batch.template.name", "type": "str"},
+        {"name": "issuer_name", "source": "batch.owner.name", "type": "str"},
+        {"name": "recipient_name", "source": "recipient.name", "type": "str"},
+    ]
+
+    class Meta:
+        model = GeneratedCertificate
+        fields = ("code", "issue_status", "issued_at", "revoked_at")
+
+    def get_code(self, instance) -> str:
+        return format_code(instance.verification_code)
