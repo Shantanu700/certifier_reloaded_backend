@@ -164,31 +164,37 @@ def render_pdf_template(
     return draw_boxes(image, [_scale_box(box, scale) for box in boxes], values)
 
 
+def render_file(batch, index: int, row: dict, boxes, image_boxes) -> tuple[UploadFile, list[str]]:
+    "Renders and uploads one certificate for `row` (values already str); raises on failure. Returns the file and font warnings."
+    validate_with_schema(RowDataSchema, row)
+    values = {box.key: row.get(batch.mapping.get(box.key, ""), "") for box in boxes}
+
+    is_pdf = batch.template.file.original_filename.lower().endswith(".pdf")
+    with batch.template.file.open() as fh:
+        image, warnings = (
+            render_pdf_template(fh, boxes, values, image_boxes)
+            if is_pdf
+            else render_image_template(fh, boxes, values, image_boxes)
+        )
+
+    base_name = resolve_filename(batch, index, row)
+    buffer = BytesIO()
+    if is_pdf:
+        image.save(buffer, format="PDF")
+        filename = f"{base_name}.pdf"
+    else:
+        image.save(buffer, format="PNG")
+        filename = f"{base_name}.png"
+
+    upload = UploadFile.upload(ContentFile(buffer.getvalue(), name=filename), provider=StorageProvider.CLOUDINARY)
+    return upload, warnings
+
+
 def generate_certificate_for_row(batch, index: int, row: dict, boxes, image_boxes) -> "GeneratedCertificate":
     "Renders one certificate for `row` and records the outcome; never raises -- failures land on the returned row."
     row = {key: (value or "") for key, value in row.items()}
     try:
-        validate_with_schema(RowDataSchema, row)
-        values = {box.key: row.get(batch.mapping.get(box.key, ""), "") for box in boxes}
-
-        is_pdf = batch.template.file.original_filename.lower().endswith(".pdf")
-        with batch.template.file.open() as fh:
-            image, warnings = (
-                render_pdf_template(fh, boxes, values, image_boxes)
-                if is_pdf
-                else render_image_template(fh, boxes, values, image_boxes)
-            )
-
-        base_name = resolve_filename(batch, index, row)
-        buffer = BytesIO()
-        if is_pdf:
-            image.save(buffer, format="PDF")
-            filename = f"{base_name}.pdf"
-        else:
-            image.save(buffer, format="PNG")
-            filename = f"{base_name}.png"
-
-        upload = UploadFile.upload(ContentFile(buffer.getvalue(), name=filename), provider=StorageProvider.CLOUDINARY)
+        upload, warnings = render_file(batch, index, row, boxes, image_boxes)
         return GeneratedCertificate.objects.create(
             batch=batch,
             row_index=index,

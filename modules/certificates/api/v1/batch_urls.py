@@ -5,9 +5,13 @@ from modules.certificates.api.v1.views import (
     CertificateBatchExportAV,
     CertificateBatchExportProgressAV,
     CertificateBatchGenerateAV,
+    CertificateBatchIssuanceAV,
+    CertificateBatchIssueAV,
+    CertificateBatchMatchAV,
     CertificateBatchMappingAV,
     CertificateBatchNamingAV,
     CertificateBatchProgressAV,
+    CertificateBatchRevokeAV,
     GeneratedCertificateAV,
 )
 
@@ -43,5 +47,21 @@ urlpatterns = [
     path(
         "<uuid:uuid>/certificates/",
         GeneratedCertificateAV.as_view(),
+    ),
+    path(
+        "<uuid:uuid>/issuance/",
+        CertificateBatchIssuanceAV.as_view(),
+    ),
+    path(
+        "<uuid:uuid>/match/",
+        CertificateBatchMatchAV.as_view(),
+    ),
+    path(
+        "<uuid:uuid>/issue/",
+        CertificateBatchIssueAV.as_view(),
+    ),
+    path(
+        "<uuid:uuid>/revoke/",
+        CertificateBatchRevokeAV.as_view(),
     ),
 ]

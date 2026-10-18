@@ -1,9 +1,13 @@
 from unittest import mock
+from urllib.parse import parse_qs, urlparse
 
+from django.core import mail
+from django.core.cache import cache
 from django.test import TestCase
 from rest_framework.test import APIClient
 
 from modules.core.models import User
+from modules.core.services import EmailVerificationError, EmailVerificationService
 
 VERIFY = "google.oauth2.id_token.verify_oauth2_token"
 CLAIMS = {"sub": "g-1", "email": "ravi@example.com", "email_verified": True, "name": "Ravi"}
@@ -12,10 +16,17 @@ CLAIMS = {"sub": "g-1", "email": "ravi@example.com", "email_verified": True, "na
 class RegisterTests(TestCase):
     def test_register_logs_in(self):
         client = APIClient()
-        r = client.post("/core/register/", {"username": "asha", "name": "Asha", "email": "asha@example.com", "password": "Sturdy-pass-91"}, format="json")
+        r = client.post("/core/register/", {"username": "asha", "name": "Asha", "email": "asha@example.com", "password": "Sturdy-pass-91", "role": "recipient"}, format="json")
         self.assertEqual(r.status_code, 201, r.content)
         self.assertNotIn("password", r.json())
-        self.assertEqual(client.get("/core/login/").json()["username"], "asha")
+        me = client.get("/core/login/").json()
+        self.assertEqual((me["username"], me["role"], me["email_verified"]), ("asha", "recipient", False))
+        self.assertEqual(len(mail.outbox), 1)  # verification link
+
+    def test_register_requires_role(self):
+        r = APIClient().post("/core/register/", {"username": "asha", "name": "Asha", "email": "asha@example.com", "password": "Sturdy-pass-91"}, format="json")
+        self.assertEqual(r.status_code, 418)
+        self.assertIn("role", r.json())
 
     def test_register_rejects_taken_email_and_weak_password(self):
         User.objects.create_user("asha", "asha@example.com", "Sturdy-pass-91")
@@ -26,16 +37,22 @@ class RegisterTests(TestCase):
 
 
 class GoogleAuthTests(TestCase):
-    def post(self, claims=CLAIMS, **patch):
+    def post(self, claims=CLAIMS, role="recipient", **patch):
         with mock.patch(VERIFY, return_value=claims, **patch):
-            return APIClient().post("/core/google/", {"id_token": "x"}, format="json")
+            return APIClient().post("/core/google/", {"id_token": "x", **({"role": role} if role else {})}, format="json")
 
     def test_creates_then_reuses_user(self):
         self.assertEqual(self.post().status_code, 201)
-        self.assertEqual(self.post().status_code, 201)
+        self.assertEqual(self.post(role=None).status_code, 201)  # existing account: no role needed
         user = User.objects.get(google_id="g-1")
         self.assertEqual(user.username, "ravi")
         self.assertFalse(user.has_usable_password())
+        self.assertEqual(user.role, "recipient")
+        self.assertTrue(user.email_verified)
+
+    def test_new_account_needs_role(self):
+        self.assertEqual(self.post(role=None).status_code, 409)
+        self.assertFalse(User.objects.exists())
 
     def test_does_not_link_existing_password_account(self):
         User.objects.create_user("ravi", "ravi@example.com", "Sturdy-pass-91")
@@ -44,3 +61,45 @@ class GoogleAuthTests(TestCase):
     def test_rejects_unverified_or_invalid_token(self):
         self.assertEqual(self.post({**CLAIMS, "email_verified": False}).status_code, 418)
         self.assertEqual(self.post(side_effect=ValueError("bad")).status_code, 418)
+
+
+class EmailVerificationTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user("asha", "asha@example.com", "Sturdy-pass-91", role="recipient")
+
+    def token(self):
+        EmailVerificationService(self.user).send()
+        link = next(line for line in mail.outbox[-1].body.splitlines() if "token=" in line)
+        return parse_qs(urlparse(link).query)["token"][0]
+
+    def test_link_verifies_once_sent(self):
+        r = APIClient().post("/core/verify-email/", {"token": self.token()}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.email_verified)
+
+    def test_link_rejected_after_email_change_or_tampering(self):
+        token = self.token()
+        self.assertEqual(APIClient().post("/core/verify-email/", {"token": token + "x"}, format="json").status_code, 409)
+        self.user.email = "someone-else@example.com"
+        self.user.save()
+        with self.assertRaises(EmailVerificationError):
+            EmailVerificationService.verify(token)
+
+    def test_resend_is_rate_limited(self):
+        self.token()
+        with self.assertRaises(EmailVerificationError):
+            EmailVerificationService(self.user).send()
+
+
+class ProfileTests(TestCase):
+    def test_phone_is_normalised_and_role_is_read_only(self):
+        user = User.objects.create_user("asha", "asha@example.com", "x", role="recipient")
+        client = APIClient()
+        client.force_authenticate(user)
+        r = client.put("/core/profile/", {"phone": "+91 98765-43210", "role": "issuer", "roll_number": "R1"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        user.refresh_from_db()
+        self.assertEqual((user.phone, user.role, user.roll_number), ("9876543210", "recipient", "R1"))
+        self.assertEqual(client.put("/core/profile/", {"phone": "12345"}, format="json").status_code, 418)

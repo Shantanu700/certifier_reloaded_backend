@@ -1,6 +1,14 @@
 from django.urls import path
 
-from modules.core.api.v1.views import GoogleAuthAV, LoginAV, PresignUploadAV, RegisterAV
+from modules.core.api.v1.views import (
+    GoogleAuthAV,
+    LoginAV,
+    PresignUploadAV,
+    ProfileAV,
+    RegisterAV,
+    ResendVerificationAV,
+    VerifyEmailAV,
+)
 
 # Write your urls here
 
@@ -20,5 +28,17 @@ urlpatterns = [
     path(
         "upload-url/",
         PresignUploadAV.as_view(),
+    ),
+    path(
+        "profile/",
+        ProfileAV.as_view(),
+    ),
+    path(
+        "verify-email/",
+        VerifyEmailAV.as_view(),
+    ),
+    path(
+        "verify-email/resend/",
+        ResendVerificationAV.as_view(),
     ),
 ]

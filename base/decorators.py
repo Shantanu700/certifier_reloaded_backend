@@ -12,12 +12,13 @@ from rest_framework.settings import api_settings
 
 from base.constants import STATUS_MAPPING
 from base.exceptions import CustomError, SerializerError
-from base.permissions import APIAuthenticationPermission
+from base.permissions import APIAuthenticationPermission, allowed_roles
 from base.serializers import FileObjectSerializer
 from base.types import (
     CustomErrorResponseType,
     SerializerErrorResponseType,
     UnAuthenticatedResponseType,
+    UnAuthorizedResponseType,
 )
 
 
@@ -127,6 +128,12 @@ def extend_base_schema(cls, handler):
         )
     else:
         extend_schema_params["auth"] = []
+
+    if allowed_roles(cls, method) != "any":
+        responses[403] = OpenApiResponse(
+            UnAuthorizedResponseType,
+            "Raised when the logged-in user's role (issuer/recipient) can't use this endpoint.",
+        )
 
     # mimic the behavior of extend_schema
     # see drf_spectacular.utils.extend_schema

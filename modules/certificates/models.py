@@ -8,6 +8,7 @@ from base.model import ModelBase
 from modules.certificates.choices import (
     CertificateBatchStatusChoices,
     ExportStatusChoices,
+    IssueStatusChoices,
     TextAlignChoices,
 )
 from modules.certificates.fonts import DEFAULT_FONT, FONT_CHOICES
@@ -79,7 +80,9 @@ class CertificateBatch(ModelBase):
         on_delete=DEFAULT_ON_DELETE,
         related_name="certificate_batches",
     )
-    file = models.ForeignKey(UploadFile, on_delete=DEFAULT_ON_DELETE, related_name="+")
+    # Null only for the per-template manual batch (`is_manual`), which has no CSV.
+    file = models.ForeignKey(UploadFile, on_delete=DEFAULT_ON_DELETE, null=True, related_name="+")
+    is_manual = models.BooleanField(default=False)
     csv_columns = models.JSONField(default=list, validators=[validate_csv_columns])
     mapping = models.JSONField(default=dict, validators=[validate_mapping])
     naming_convention = models.JSONField(null=True, validators=[validate_naming_convention])
@@ -95,6 +98,7 @@ class CertificateBatch(ModelBase):
     export_processed_rows = models.PositiveIntegerField(default=0)
     export_error_message = models.TextField(blank=True, default="")
     export_file = models.ForeignKey(UploadFile, on_delete=DEFAULT_ON_DELETE, null=True, related_name="+")
+    match_fields = models.JSONField(default=dict, blank=True, help_text="{recipient_field: csv_column} used to find recipients.")
 
 
 class GeneratedCertificate(ModelBase):
@@ -106,3 +110,14 @@ class GeneratedCertificate(ModelBase):
     file = models.ForeignKey(UploadFile, on_delete=DEFAULT_ON_DELETE, null=True, related_name="+")
     is_successful = models.BooleanField(default=False)
     error_message = models.TextField(blank=True, default="")
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=DEFAULT_ON_DELETE,
+        null=True,
+        blank=True,
+        related_name="received_certificates",
+    )
+    issue_status = models.CharField(max_length=20, choices=IssueStatusChoices.choices, default=IssueStatusChoices.DRAFT)
+    match_error = models.CharField(max_length=255, blank=True, default="", help_text="Why matching left it unassigned.")
+    issued_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)

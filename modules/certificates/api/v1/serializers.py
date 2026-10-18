@@ -7,7 +7,7 @@ from rest_framework import serializers
 from base.serializers import BaseSerializer
 from base.validators import validate_with_schema
 from modules.canva.services import EXPORT_WIDTH, MAX_EXPORT_WIDTH, MIN_EXPORT_WIDTH
-from modules.certificates.choices import CertificateBatchStatusChoices, TextAlignChoices
+from modules.certificates.choices import CertificateBatchStatusChoices, IssueStatusChoices, TextAlignChoices
 from modules.certificates.fonts import BUNDLED_FONTS, DEFAULT_FONT
 from modules.certificates.models import (
     CertificateBatch,
@@ -17,6 +17,8 @@ from modules.certificates.models import (
     TemplateImageBox,
 )
 from modules.certificates.schemas import BoxMappingSchema, NamingConventionSchema
+from modules.certificates.services import MATCH_FIELDS
+from modules.core.models import User
 
 # Write your serializers here
 
@@ -260,9 +262,76 @@ class CertificateBatchNamingSerializer(serializers.Serializer):
         return value
 
 
+class RecipientSummarySerializer(BaseSerializer):
+    "What an issuer sees of a recipient -- never phone or date of birth."
+
+    class Meta:
+        model = User
+        fields = ("uuid", "name", "username", "email", "roll_number", "institution")
+
+
 class GeneratedCertificateSerializer(BaseSerializer):
     file_fields = ["file"]  # noqa: RUF012
+    recipient = RecipientSummarySerializer(read_only=True, allow_null=True)
 
     class Meta:
         model = GeneratedCertificate
         exclude = ("batch",)
+
+
+class IssuanceCountsSerializer(serializers.Serializer):
+    unassigned = serializers.IntegerField(help_text="Draft, rendered, no recipient yet.")
+    ready = serializers.IntegerField(help_text="Draft with a recipient; issued by the next Issue.")
+    issued = serializers.IntegerField()
+    revoked = serializers.IntegerField()
+    failed = serializers.IntegerField(help_text="Draft that failed to render; can't be issued until fixed.")
+
+
+class CertificateMatchSerializer(serializers.Serializer):
+    match_fields = serializers.DictField(
+        child=serializers.CharField(),
+        help_text=f"{{recipient_field: csv_column}}; fields: {', '.join(MATCH_FIELDS)}. A row matches when all agree.",
+    )
+    overwrite = serializers.BooleanField(default=False, help_text="Also re-match drafts that already have a recipient.")
+
+
+class CertificateUpdateSerializer(serializers.Serializer):
+    recipient = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, help_text="Exact email or username; null/blank clears it."
+    )
+    values = serializers.DictField(
+        child=serializers.CharField(allow_blank=True, max_length=500),
+        required=False,
+        help_text="{box_key: text}; the certificate is re-rendered.",
+    )
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("Provide 'recipient' or 'values'.")
+        return attrs
+
+
+class IssueOneSerializer(serializers.Serializer):
+    recipient = serializers.CharField(max_length=255, help_text="Exact email or username of a verified recipient.")
+    values = serializers.DictField(child=serializers.CharField(allow_blank=True, max_length=500), help_text="{box_key: text}")
+
+
+class ReceivedCertificateSerializer(BaseSerializer):
+    "A recipient's view of a certificate issued to them."
+
+    file_fields = ["file"]  # noqa: RUF012
+    dynamic_keys = [  # noqa: RUF012
+        {"name": "template_name", "source": "batch.template.name", "type": "str"},
+        {"name": "issuer_name", "source": "batch.owner.name", "type": "str"},
+    ]
+
+    class Meta:
+        model = GeneratedCertificate
+        fields = ("uuid", "file", "issue_status", "issued_at", "revoked_at")
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.issue_status != IssueStatusChoices.ISSUED:
+            data["file"] = None  # revoked: no download
+        return data
+

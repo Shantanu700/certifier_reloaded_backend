@@ -2,7 +2,7 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 
 from base.defaults import DEFAULT_ON_DELETE
-from base.enums import StorageProvider
+from base.enums import RoleEnum, StorageProvider
 from base.manager import UserManager
 from base.model import DropdownBase, ModelBase
 from base.storage import get_storage_service
@@ -76,6 +76,14 @@ class User(ModelBase, AbstractUser):
         null=True,
         related_name="user_genders",
     )
+    # Existing accounts predate roles and all own templates, hence the issuer default; sign-up always sets it.
+    role = models.CharField(max_length=20, choices=RoleEnum.choices, default=RoleEnum.ISSUER)
+    email_verified = models.BooleanField(default=False)
+    # Recipient profile -- self-entered, so matching treats them as hints and only trusts verified accounts.
+    roll_number = models.CharField(max_length=100, blank=True, default="")
+    phone = models.CharField(max_length=10, blank=True, default="", help_text="Digits only, last 10.")
+    date_of_birth = models.DateField(null=True, blank=True)
+    institution = models.CharField(max_length=255, blank=True, default="")
     objects = UserManager()
 
     USERNAME_FIELD = "username"
