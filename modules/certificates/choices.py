@@ -22,3 +22,9 @@ class ExportStatusChoices(TextChoices):
     PROCESSING = "processing", "Processing"
     COMPLETED = "completed", "Completed"
     FAILED = "failed", "Failed"
+
+
+class IssueStatusChoices(TextChoices):
+    DRAFT = "draft", "Draft"
+    ISSUED = "issued", "Issued"
+    REVOKED = "revoked", "Revoked"

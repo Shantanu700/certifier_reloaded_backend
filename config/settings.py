@@ -21,7 +21,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-d#85asx!ojvok8yfs+f&206+2=w2i0!vxjg7zgqsy#f30&v+i$"
+# Also signs email-verification links, so it must never be a committed value.
+SECRET_KEY = os.environ["SECRET_KEY"]
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -82,6 +83,19 @@ CANVA_CLIENT_SECRET = os.environ.get("CANVA_CLIENT_SECRET", "")
 CANVA_REDIRECT_URI = os.environ.get("CANVA_REDIRECT_URI", "")
 # Fernet key that encrypts stored Canva tokens. Rotating it disconnects every user's Canva account.
 CANVA_TOKEN_KEY = os.environ.get("CANVA_TOKEN_KEY", "")
+
+# Where links in emails point (the Next.js app).
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://127.0.0.1:3000").rstrip("/")
+
+# Console backend prints mails to the server log until SMTP is configured.
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() == "true"
+EMAIL_TIMEOUT = 10
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Certifier <no-reply@localhost>")
 
 # Application definition
 

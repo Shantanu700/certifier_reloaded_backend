@@ -4,6 +4,7 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from rest_framework import serializers
 
+from base.enums import RoleEnum
 from base.serializers import BaseSerializer
 from modules.core.models import MasterDropdown, User
 
@@ -33,10 +34,11 @@ class LoginSerializer(BaseSerializer):
 class RegisterSerializer(BaseSerializer):
     password = serializers.CharField(write_only=True, style={"input_type": "password"})
     email = serializers.EmailField()
+    role = serializers.ChoiceField(choices=RoleEnum.choices)
 
     class Meta:
         model = User
-        fields = ("username", "name", "email", "password")
+        fields = ("username", "name", "email", "password", "role")
 
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
@@ -53,6 +55,9 @@ class RegisterSerializer(BaseSerializer):
 
 class GoogleAuthSerializer(serializers.Serializer):
     id_token = serializers.CharField(write_only=True)
+    role = serializers.ChoiceField(
+        choices=RoleEnum.choices, required=False, help_text="Required the first time, when the account is created."
+    )
 
     def validate(self, attrs):
         try:
@@ -67,6 +72,29 @@ class GoogleAuthSerializer(serializers.Serializer):
             raise serializers.ValidationError("Your Google email address is not verified.")
         attrs["id_token"] = claims
         return attrs
+
+
+class ProfileSerializer(BaseSerializer):
+    # Longer than the stored 10 digits so "+91 98765-43210" reaches validate_phone and gets normalised.
+    phone = serializers.CharField(required=False, allow_blank=True, max_length=20)
+
+    class Meta:
+        model = User
+        fields = (
+            "uuid", "username", "email", "role", "email_verified",
+            "name", "roll_number", "phone", "date_of_birth", "institution",
+        )
+        read_only_fields = ("uuid", "username", "email", "role", "email_verified")
+
+    def validate_phone(self, value):
+        digits = "".join(ch for ch in value if ch.isdigit())
+        if digits and len(digits) < 10:
+            raise serializers.ValidationError("Enter a 10-digit phone number.")
+        return digits[-10:]
+
+
+class VerifyEmailSerializer(serializers.Serializer):
+    token = serializers.CharField(max_length=500)
 
 
 class PresignUploadRequestSerializer(serializers.Serializer):

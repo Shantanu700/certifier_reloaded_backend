@@ -10,7 +10,7 @@ from base.constants import STATUS_MAPPING
 from base.decorators import extend_base_schema
 from base.exceptions import CustomError, PermissionException
 from base.permissions import APIAuthenticationPermission
-from base.types import AuthenticationMethodTypes
+from base.types import AllowedRolesType, AuthenticationMethodTypes, MethodTypes
 
 # Write your views here
 
@@ -19,6 +19,7 @@ class BaseAV(APIView):
 
     permission_classes = [APIAuthenticationPermission,]
     authentication: bool | AuthenticationMethodTypes = True
+    roles: AllowedRolesType | MethodTypes = "any"
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)

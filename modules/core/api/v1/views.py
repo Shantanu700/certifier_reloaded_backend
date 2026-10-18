@@ -14,7 +14,7 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from base.decorators import extend_response
-from base.enums import StorageProvider
+from base.enums import RoleEnum, StorageProvider
 from base.exceptions import SerializerError
 from base.storage import StorageError, get_storage_service
 from base.types import DefaultSuccessResponseType
@@ -24,9 +24,12 @@ from modules.core.api.v1.serializers import (
     LoginSerializer,
     PresignUploadRequestSerializer,
     PresignUploadResponseSerializer,
+    ProfileSerializer,
     RegisterSerializer,
+    VerifyEmailSerializer,
 )
 from modules.core.models import UploadFile, User
+from modules.core.services import EmailVerificationError, EmailVerificationService
 
 # Write your views here
 
@@ -114,6 +117,10 @@ class RegisterAV(BaseAV):
         if not serializer.is_valid():
             raise SerializerError(serializer.errors)
         user = serializer.save()
+        try:
+            EmailVerificationService(user).send()
+        except EmailVerificationError:
+            pass  # the account still works; the profile page offers a resend
         login(request, user)
         return LoginSerializer(instance=user).data
 
@@ -150,13 +157,21 @@ class GoogleAuthAV(BaseAV):
             # keep password access to the Google user's account.
             if User.objects.filter(email__iexact=claims["email"]).exists():
                 self.fail("An account with this email already exists. Log in with your username and password.")
+            if "role" not in serializer.validated_data:
+                self.fail("No account yet. Sign up first and choose Issuer or Recipient.")
             user = User.objects.create_user(
                 username=_generate_username_from_email(claims["email"]),
                 email=claims["email"],
                 name=claims.get("name", ""),
                 password=None,
                 google_id=claims["sub"],
+                role=serializer.validated_data["role"],
+                email_verified=True,
             )
+        elif not user.email_verified:
+            # Google only signs in verified addresses (checked in the serializer).
+            user.email_verified = True
+            user.save(update_fields=["email_verified"])
 
         login(request, user)
         return LoginSerializer(instance=user).data
@@ -164,6 +179,8 @@ class GoogleAuthAV(BaseAV):
 
 class PresignUploadAV(BaseAV):
     "Request a presigned S3 upload URL for a client-direct file upload."
+
+    roles = [RoleEnum.ISSUER]  # every upload category is issuer material
 
     @extend_schema(request=PresignUploadRequestSerializer)
     @extend_response(PresignUploadResponseSerializer())
@@ -197,3 +214,54 @@ class PresignUploadAV(BaseAV):
             "headers": presigned.headers,
             "expires_in": presigned.expires_in,
         }
+
+
+class ProfileAV(BaseAV):
+    "The logged-in user's own profile; recipients' fields are what issuers match CSV rows against."
+
+    @extend_schema(operation_id="retrieve_profile")
+    @extend_response(ProfileSerializer())
+    def get(self, request):
+        return ProfileSerializer(instance=request.user).data
+
+    @extend_schema(request=ProfileSerializer)
+    @extend_response(ProfileSerializer())
+    def put(self, request):
+        serializer = ProfileSerializer(instance=request.user, data=request.data, partial=True)
+        if not serializer.is_valid():
+            raise SerializerError(serializer.errors)
+        serializer.save()
+        return serializer.data
+
+
+class VerifyEmailAV(BaseAV):
+    "Confirm an email address from the emailed link (works whether or not the user is logged in)."
+
+    authentication = {
+        "post": False,
+    }
+
+    @extend_schema(request=VerifyEmailSerializer)
+    @extend_response(DefaultSuccessResponseType)
+    def post(self, request):
+        serializer = VerifyEmailSerializer(data=request.data)
+        if not serializer.is_valid():
+            raise SerializerError(serializer.errors)
+        try:
+            EmailVerificationService.verify(serializer.validated_data["token"])
+        except EmailVerificationError as exc:
+            self.fail(str(exc))
+        return self.success("Email verified.")
+
+
+class ResendVerificationAV(BaseAV):
+    "Email the logged-in user a fresh verification link."
+
+    @extend_schema(request=None)
+    @extend_response(DefaultSuccessResponseType)
+    def post(self, request):
+        try:
+            EmailVerificationService(request.user).send()
+        except EmailVerificationError as exc:
+            self.fail(str(exc))
+        return self.success(f"Verification email sent to {request.user.email}.")

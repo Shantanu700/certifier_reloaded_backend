@@ -10,6 +10,7 @@ from modules.certificates.api.v1.views import (
     CertificateTemplateDetailAV,
     CertificateTemplateImageBoxAV,
     CertificateTemplateImageBoxDetailAV,
+    CertificateTemplateIssueOneAV,
 )
 
 # Write your urls here
@@ -22,6 +23,10 @@ urlpatterns = [
     path(
         "import-canva/",
         CertificateTemplateCanvaImportAV.as_view(),
+    ),
+    path(
+        "<uuid:uuid>/issue-one/",
+        CertificateTemplateIssueOneAV.as_view(),
     ),
     path(
         "<uuid:uuid>/",

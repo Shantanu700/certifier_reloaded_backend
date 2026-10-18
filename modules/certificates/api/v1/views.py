@@ -10,7 +10,7 @@ from PIL import Image, UnidentifiedImageError
 from rest_framework.exceptions import NotFound
 
 from base.decorators import extend_response
-from base.enums import Status, StorageProvider
+from base.enums import RoleEnum, Status, StorageProvider
 from base.exceptions import CustomError, SerializerError
 from base.pagination import DefaultPagination
 from base.storage import StorageError, get_storage_service
@@ -28,10 +28,15 @@ from modules.certificates.api.v1.serializers import (
     CertificateBatchProgressSerializer,
     CertificateBatchSerializer,
     CertificateBatchUploadSerializer,
+    CertificateMatchSerializer,
     CertificateTemplateSerializer,
+    CertificateUpdateSerializer,
     CertificateTemplateUpdateSerializer,
     CertificateTemplateUploadSerializer,
     GeneratedCertificateSerializer,
+    IssuanceCountsSerializer,
+    IssueOneSerializer,
+    ReceivedCertificateSerializer,
     TemplateBoxCreateSerializer,
     TemplateBoxSerializer,
     TemplateBoxUpdateSerializer,
@@ -42,14 +47,17 @@ from modules.certificates.api.v1.serializers import (
 from modules.certificates.choices import (
     CertificateBatchStatusChoices,
     ExportStatusChoices,
+    IssueStatusChoices,
 )
 from modules.certificates.models import (
     CertificateBatch,
     CertificateTemplate,
+    GeneratedCertificate,
     TemplateBox,
     TemplateImageBox,
 )
 from modules.certificates.schemas import CSVColumnsSchema
+from modules.certificates.services import FILTERS, IssuanceError, IssuanceService
 from modules.certificates.tasks import (
     export_certificates_task,
     generate_certificates_task,
@@ -79,6 +87,8 @@ def confirm_s3_upload(upload_uuid, allowed_types: dict[str, str], max_size: int)
 
 class CertificateTemplateAV(BaseAV):
     "List & Upload Certificate Templates"
+
+    roles = [RoleEnum.ISSUER]
 
     @extend_schema(
         operation_id="list_certificate_templates",
@@ -128,6 +138,8 @@ class CertificateTemplateAV(BaseAV):
 class CertificateTemplateDetailAV(BaseAV):
     "Retrieve, Update & Delete a single Certificate Template"
 
+    roles = [RoleEnum.ISSUER]
+
     def get_object(self, request, uuid):
         try:
             return CertificateTemplate.objects.get(uuid=uuid, owner=request.user)
@@ -168,6 +180,10 @@ class CertificateTemplateDetailAV(BaseAV):
     @extend_response(DefaultSuccessResponseType)
     def delete(self, request, uuid):
         template = self.get_object(request, uuid)
+        if GeneratedCertificate.objects.filter(
+            batch__template=template, issue_status=IssueStatusChoices.ISSUED
+        ).exists():
+            self.fail("Recipients hold certificates from this template. Revoke them before deleting it.")
         template.status = Status.DELETED
         template.save()
         return self.success("Certificate template deleted.")
@@ -186,6 +202,8 @@ def store_canva_export(image: ExportedImage) -> UploadFile:
 @method_decorator(transaction.non_atomic_requests, name="dispatch")
 class CertificateTemplateCanvaImportAV(BaseAV):
     "Import one page of a Canva design as a new Certificate Template"
+
+    roles = [RoleEnum.ISSUER]
 
     @extend_schema(request=CanvaTemplateImportSerializer)
     @extend_response(CanvaTemplateImportResultSerializer())
@@ -219,6 +237,8 @@ class CertificateTemplateCanvaImportAV(BaseAV):
 @method_decorator(transaction.non_atomic_requests, name="dispatch")
 class CertificateTemplateCanvaSyncAV(BaseAV):
     "Re-export a Canva-imported Certificate Template's design page and replace its file"
+
+    roles = [RoleEnum.ISSUER]
 
     def get_object(self, request, uuid):
         try:
@@ -270,6 +290,8 @@ class CertificateTemplateCanvaSyncAV(BaseAV):
 class CertificateTemplateBoxAV(BaseAV):
     "List & Create Text Boxes for a Certificate Template"
 
+    roles = [RoleEnum.ISSUER]
+
     def get_template(self, request, template_uuid):
         try:
             return CertificateTemplate.objects.get(uuid=template_uuid, owner=request.user)
@@ -297,6 +319,8 @@ class CertificateTemplateBoxAV(BaseAV):
 
 class CertificateTemplateBoxDetailAV(BaseAV):
     "Retrieve, Update & Delete a single Template Box"
+
+    roles = [RoleEnum.ISSUER]
 
     def get_object(self, request, template_uuid, uuid):
         try:
@@ -335,6 +359,8 @@ class CertificateTemplateBoxDetailAV(BaseAV):
 class CertificateTemplateImageBoxAV(BaseAV):
     "List & Create Image Boxes for a Certificate Template"
 
+    roles = [RoleEnum.ISSUER]
+
     def get_template(self, request, template_uuid):
         try:
             return CertificateTemplate.objects.get(uuid=template_uuid, owner=request.user)
@@ -364,6 +390,8 @@ class CertificateTemplateImageBoxAV(BaseAV):
 
 class CertificateTemplateImageBoxDetailAV(BaseAV):
     "Retrieve, Update & Delete a single Template Image Box"
+
+    roles = [RoleEnum.ISSUER]
 
     def get_object(self, request, template_uuid, uuid):
         try:
@@ -411,6 +439,8 @@ class CertificateTemplateImageBoxDetailAV(BaseAV):
 class CertificateBatchAV(BaseAV):
     "List & Upload Certificate Batches (CSV) for a Certificate Template"
 
+    roles = [RoleEnum.ISSUER]
+
     def get_template(self, request, template_uuid):
         try:
             return CertificateTemplate.objects.get(uuid=template_uuid, owner=request.user)
@@ -457,6 +487,8 @@ class CertificateBatchAV(BaseAV):
 class CertificateBatchDetailAV(BaseAV):
     "Retrieve & Delete a single Certificate Batch"
 
+    roles = [RoleEnum.ISSUER]
+
     def get_object(self, request, uuid):
         try:
             return CertificateBatch.objects.get(uuid=uuid, owner=request.user)
@@ -471,6 +503,8 @@ class CertificateBatchDetailAV(BaseAV):
     @extend_response(DefaultSuccessResponseType)
     def delete(self, request, uuid):
         batch = self.get_object(request, uuid)
+        if batch.certificates.filter(issue_status=IssueStatusChoices.ISSUED).exists():
+            self.fail("Recipients hold certificates from this batch. Revoke them before deleting it.")
         batch.status = Status.DELETED
         batch.save()
         return self.success("Certificate batch deleted.")
@@ -478,6 +512,8 @@ class CertificateBatchDetailAV(BaseAV):
 
 class CertificateBatchProgressAV(BaseAV):
     "Lightweight polling endpoint: generation_status/total_rows/processed_rows only, nothing else."
+
+    roles = [RoleEnum.ISSUER]
 
     def get_object(self, request, uuid):
         try:
@@ -494,6 +530,8 @@ class CertificateBatchProgressAV(BaseAV):
 class CertificateBatchMappingAV(BaseAV):
     "Set the CSV column -> template box mapping for a Certificate Batch"
 
+    roles = [RoleEnum.ISSUER]
+
     def get_object(self, request, uuid):
         try:
             return CertificateBatch.objects.get(uuid=uuid, owner=request.user)
@@ -504,6 +542,8 @@ class CertificateBatchMappingAV(BaseAV):
     @extend_response(CertificateBatchSerializer())
     def put(self, request, uuid):
         batch = self.get_object(request, uuid)
+        if batch.is_manual:
+            self.fail("Certificates issued by hand have no CSV to map.")
         serializer = CertificateBatchMappingSerializer(data=request.data)
         if not serializer.is_valid():
             raise SerializerError(serializer.errors)
@@ -528,6 +568,8 @@ class CertificateBatchMappingAV(BaseAV):
 class CertificateBatchNamingAV(BaseAV):
     "Set the filename-naming convention for a Certificate Batch"
 
+    roles = [RoleEnum.ISSUER]
+
     def get_object(self, request, uuid):
         try:
             return CertificateBatch.objects.get(uuid=uuid, owner=request.user)
@@ -538,6 +580,8 @@ class CertificateBatchNamingAV(BaseAV):
     @extend_response(CertificateBatchSerializer())
     def put(self, request, uuid):
         batch = self.get_object(request, uuid)
+        if batch.is_manual:
+            self.fail("Certificates issued by hand have no CSV to name files from.")
         serializer = CertificateBatchNamingSerializer(data=request.data)
         if not serializer.is_valid():
             raise SerializerError(serializer.errors)
@@ -557,6 +601,8 @@ class CertificateBatchNamingAV(BaseAV):
 class CertificateBatchGenerateAV(BaseAV):
     "Enqueue certificate generation for a mapped Certificate Batch"
 
+    roles = [RoleEnum.ISSUER]
+
     def get_object(self, request, uuid):
         try:
             return CertificateBatch.objects.get(uuid=uuid, owner=request.user)
@@ -572,9 +618,15 @@ class CertificateBatchGenerateAV(BaseAV):
             CertificateBatchStatusChoices.COMPLETED,
             CertificateBatchStatusChoices.FAILED,
         )
+        if batch.is_manual:
+            self.fail("Certificates issued by hand are generated one at a time.")
         if batch.generation_status not in allowed_statuses:
             self.fail(f"Cannot generate from a batch in '{batch.generation_status}' status.")
+        if batch.certificates.filter(issue_status=IssueStatusChoices.ISSUED).exists():
+            self.fail("Some certificates from this batch are issued. Revoke them before generating again.")
 
+        # Re-running replaces the drafts instead of duplicating every row; revoked ones stay as the record.
+        batch.certificates.filter(issue_status=IssueStatusChoices.DRAFT).update(status=Status.DELETED)
         batch.generation_status = CertificateBatchStatusChoices.QUEUED
         batch.processed_rows = 0
         batch.total_rows = 0
@@ -587,6 +639,8 @@ class CertificateBatchGenerateAV(BaseAV):
 
 class CertificateBatchExportAV(BaseAV):
     "Enqueue building a zip of a Certificate Batch's generated certificates"
+
+    roles = [RoleEnum.ISSUER]
 
     def get_object(self, request, uuid):
         try:
@@ -618,6 +672,8 @@ class CertificateBatchExportAV(BaseAV):
 class CertificateBatchExportProgressAV(BaseAV):
     "Lightweight polling endpoint for export progress, including the zip's download link once ready"
 
+    roles = [RoleEnum.ISSUER]
+
     def get_object(self, request, uuid):
         try:
             return CertificateBatch.objects.get(uuid=uuid, owner=request.user)
@@ -635,18 +691,238 @@ class CertificateBatchExportProgressAV(BaseAV):
 class GeneratedCertificateAV(BaseAV):
     "List Generated Certificates for a Certificate Batch"
 
+    roles = [RoleEnum.ISSUER]
+
     def get_batch(self, request, uuid):
         try:
             return CertificateBatch.objects.get(uuid=uuid, owner=request.user)
         except CertificateBatch.DoesNotExist:
             raise NotFound("Certificate batch not found.")
 
-    @extend_schema(operation_id="list_generated_certificates")
+    @extend_schema(
+        operation_id="list_generated_certificates",
+        parameters=[
+            OpenApiParameter("filter", OpenApiTypes.STR, enum=list(FILTERS), description="Only one review bucket."),
+            OpenApiParameter("page", OpenApiTypes.INT, description="1-indexed page number."),
+            OpenApiParameter("page_size", OpenApiTypes.INT, description="Certificates per page."),
+        ],
+    )
     @extend_response(GeneratedCertificateSerializer(), paginated=True)
     def get(self, request, uuid):
         batch = self.get_batch(request, uuid)
-        queryset = batch.certificates.order_by("row_index")
+        queryset = batch.certificates.select_related("recipient", "file").order_by("row_index")
+        bucket = FILTERS.get(request.query_params.get("filter", ""))
+        if bucket is not None:
+            queryset = queryset.filter(bucket)
         paginator = DefaultPagination()
         page = paginator.paginate_queryset(queryset, request)
         serializer = GeneratedCertificateSerializer(page, many=True, context={"request": request})
+        return paginator.get_paginated_response(serializer.data)
+
+
+class CertificateBatchIssuanceAV(BaseAV):
+    "How many of a batch's certificates are unassigned, ready, issued, revoked or failed"
+
+    roles = [RoleEnum.ISSUER]
+
+    def get_object(self, request, uuid):
+        try:
+            return CertificateBatch.objects.get(uuid=uuid, owner=request.user)
+        except CertificateBatch.DoesNotExist:
+            raise NotFound("Certificate batch not found.")
+
+    @extend_schema(operation_id="retrieve_certificate_batch_issuance")
+    @extend_response(IssuanceCountsSerializer())
+    def get(self, request, uuid):
+        return IssuanceService(self.get_object(request, uuid)).counts()
+
+
+class CertificateBatchMatchAV(BaseAV):
+    "Propose a recipient for each draft certificate by matching CSV columns to recipient profile fields"
+
+    roles = [RoleEnum.ISSUER]
+
+    def get_object(self, request, uuid):
+        try:
+            return CertificateBatch.objects.get(uuid=uuid, owner=request.user)
+        except CertificateBatch.DoesNotExist:
+            raise NotFound("Certificate batch not found.")
+
+    @extend_schema(request=CertificateMatchSerializer)
+    @extend_response(IssuanceCountsSerializer())
+    def post(self, request, uuid):
+        batch = self.get_object(request, uuid)
+        serializer = CertificateMatchSerializer(data=request.data)
+        if not serializer.is_valid():
+            raise SerializerError(serializer.errors)
+        try:
+            return IssuanceService(batch).match(**serializer.validated_data)
+        except IssuanceError as exc:
+            self.fail(str(exc))
+
+
+class CertificateBatchIssueAV(BaseAV):
+    "Issue every draft certificate of a batch that has a recipient"
+
+    roles = [RoleEnum.ISSUER]
+
+    def get_object(self, request, uuid):
+        try:
+            return CertificateBatch.objects.get(uuid=uuid, owner=request.user)
+        except CertificateBatch.DoesNotExist:
+            raise NotFound("Certificate batch not found.")
+
+    @extend_schema(request=None)
+    @extend_response(IssuanceCountsSerializer())
+    def post(self, request, uuid):
+        try:
+            return IssuanceService(self.get_object(request, uuid)).issue()
+        except IssuanceError as exc:
+            self.fail(str(exc))
+
+
+class CertificateBatchRevokeAV(BaseAV):
+    "Revoke every issued certificate of a batch"
+
+    roles = [RoleEnum.ISSUER]
+
+    def get_object(self, request, uuid):
+        try:
+            return CertificateBatch.objects.get(uuid=uuid, owner=request.user)
+        except CertificateBatch.DoesNotExist:
+            raise NotFound("Certificate batch not found.")
+
+    @extend_schema(request=None)
+    @extend_response(IssuanceCountsSerializer())
+    def post(self, request, uuid):
+        try:
+            return IssuanceService(self.get_object(request, uuid)).revoke()
+        except IssuanceError as exc:
+            self.fail(str(exc))
+
+
+class GeneratedCertificateDetailAV(BaseAV):
+    "Retrieve, edit (recipient and/or box text) & delete one certificate"
+
+    roles = [RoleEnum.ISSUER]
+
+    def get_object(self, request, uuid):
+        try:
+            return GeneratedCertificate.objects.select_related("batch__template").get(
+                uuid=uuid, batch__owner=request.user
+            )
+        except GeneratedCertificate.DoesNotExist:
+            raise NotFound("Certificate not found.")
+
+    @extend_schema(operation_id="retrieve_generated_certificate")
+    @extend_response(GeneratedCertificateSerializer())
+    def get(self, request, uuid):
+        return GeneratedCertificateSerializer(instance=self.get_object(request, uuid), context={"request": request}).data
+
+    @extend_schema(request=CertificateUpdateSerializer)
+    @extend_response(GeneratedCertificateSerializer())
+    def put(self, request, uuid):
+        certificate = self.get_object(request, uuid)
+        serializer = CertificateUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            raise SerializerError(serializer.errors)
+        service = IssuanceService(certificate.batch)
+        try:
+            # Values first: assigning requires a rendered certificate, and editing may be what fixes it.
+            if "values" in serializer.validated_data:
+                service.edit_values(certificate, serializer.validated_data["values"])
+            if "recipient" in serializer.validated_data:
+                service.assign(certificate, serializer.validated_data["recipient"])
+        except IssuanceError as exc:
+            self.fail(str(exc))
+        return GeneratedCertificateSerializer(instance=certificate, context={"request": request}).data
+
+    @extend_response(DefaultSuccessResponseType)
+    def delete(self, request, uuid):
+        certificate = self.get_object(request, uuid)
+        try:
+            IssuanceService(certificate.batch).delete(certificate)
+        except IssuanceError as exc:
+            self.fail(str(exc))
+        return self.success("Certificate deleted.")
+
+
+class GeneratedCertificateRevokeAV(BaseAV):
+    "Revoke one issued certificate"
+
+    roles = [RoleEnum.ISSUER]
+
+    def get_object(self, request, uuid):
+        try:
+            return GeneratedCertificate.objects.select_related("batch").get(uuid=uuid, batch__owner=request.user)
+        except GeneratedCertificate.DoesNotExist:
+            raise NotFound("Certificate not found.")
+
+    @extend_schema(request=None)
+    @extend_response(GeneratedCertificateSerializer())
+    def post(self, request, uuid):
+        certificate = self.get_object(request, uuid)
+        try:
+            IssuanceService(certificate.batch).revoke_one(certificate)
+        except IssuanceError as exc:
+            self.fail(str(exc))
+        return GeneratedCertificateSerializer(instance=certificate, context={"request": request}).data
+
+
+class CertificateTemplateIssueOneAV(BaseAV):
+    "Render one certificate from typed values and issue it to a recipient (no CSV)"
+
+    roles = [RoleEnum.ISSUER]
+
+    def get_object(self, request, uuid):
+        try:
+            return CertificateTemplate.objects.get(uuid=uuid, owner=request.user)
+        except CertificateTemplate.DoesNotExist:
+            raise NotFound("Certificate template not found.")
+
+    @extend_schema(request=IssueOneSerializer)
+    @extend_response(GeneratedCertificateSerializer())
+    def post(self, request, uuid):
+        template = self.get_object(request, uuid)
+        serializer = IssueOneSerializer(data=request.data)
+        if not serializer.is_valid():
+            raise SerializerError(serializer.errors)
+        try:
+            certificate = IssuanceService.for_manual(template).issue_one(
+                serializer.validated_data["recipient"], serializer.validated_data["values"]
+            )
+        except IssuanceError as exc:
+            self.fail(str(exc))
+        return GeneratedCertificateSerializer(instance=certificate, context={"request": request}).data
+
+
+class ReceivedCertificateAV(BaseAV):
+    "A recipient's issued and revoked certificates (drafts are never shown)"
+
+    roles = [RoleEnum.RECIPIENT]
+
+    @extend_schema(
+        operation_id="list_received_certificates",
+        parameters=[
+            OpenApiParameter("page", OpenApiTypes.INT, description="1-indexed page number."),
+            OpenApiParameter("page_size", OpenApiTypes.INT, description="Certificates per page."),
+        ],
+    )
+    @extend_response(ReceivedCertificateSerializer(), paginated=True)
+    def get(self, request):
+        queryset = (
+            GeneratedCertificate.objects.filter(
+                recipient=request.user,
+                issue_status__in=(IssueStatusChoices.ISSUED, IssueStatusChoices.REVOKED),
+            )
+            # Deleting is blocked while certificates are issued, so this only drops revoked ones
+            # whose batch or template went later -- and reading those would raise (soft-delete base manager).
+            .exclude(batch__status=Status.DELETED)
+            .exclude(batch__template__status=Status.DELETED)
+            .select_related("batch__template", "batch__owner", "file")
+            .order_by("-issued_at")
+        )
+        paginator = DefaultPagination()
+        page = paginator.paginate_queryset(queryset, request)
+        serializer = ReceivedCertificateSerializer(page, many=True, context={"request": request})
         return paginator.get_paginated_response(serializer.data)

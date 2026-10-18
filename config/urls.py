@@ -55,6 +55,10 @@ urlpatterns = [
         include("modules.certificates.api.v1.batch_urls"),
     ),
     path(
+        "certificates/",
+        include("modules.certificates.api.v1.certificate_urls"),
+    ),
+    path(
         "canva/",
         include("modules.canva.api.v1.urls"),
     ),

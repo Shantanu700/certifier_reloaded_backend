@@ -1,8 +1,16 @@
 from typing import cast
 
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
+
+
+def allowed_roles(view, method: str):
+    "The view's `roles` for this method: a list of RoleEnum values, or 'any'."
+    roles = getattr(view, "roles", "any")
+    return roles.get(method, "any") if isinstance(roles, dict) else roles
+
 
 class APIAuthenticationPermission(BasePermission):
     message = "You are unauthenticated! Please login again!"
@@ -19,4 +27,11 @@ class APIAuthenticationPermission(BasePermission):
         ):
             return True
 
-        return bool(request.user and request.user.is_authenticated)
+        if not (request.user and request.user.is_authenticated):
+            return False
+
+        roles = allowed_roles(view, method)
+        if roles != "any" and request.user.role not in roles:
+            # 403, not the 401 above: the user is logged in, just not allowed here.
+            raise PermissionDenied(f"This is only available to {' and '.join(r.label.lower() for r in roles)}s.")
+        return True

@@ -1,4 +1,4 @@
-from enum import IntEnum, StrEnum
+from enum import IntEnum
 
 from django.db.models import TextChoices
 
@@ -10,9 +10,9 @@ class Status(IntEnum):
     UPDATED = 1
     DELETED = 2
 
-class RoleEnum(StrEnum):
-    EMPLOYEE = "employee"
-    HR = "hr"
+class RoleEnum(TextChoices):
+    ISSUER = "issuer", "Issuer"
+    RECIPIENT = "recipient", "Recipient"
 
 
 class StorageProvider(TextChoices):

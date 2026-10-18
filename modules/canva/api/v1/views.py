@@ -6,6 +6,7 @@ from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
 from base.decorators import extend_response
+from base.enums import RoleEnum
 from base.exceptions import SerializerError
 from base.types import DefaultSuccessResponseType
 from base.views import BaseAV
@@ -25,6 +26,8 @@ from modules.canva.services import CanvaError, CanvaService
 class CanvaConnectAV(BaseAV):
     "Start connecting the user's Canva account"
 
+    roles = [RoleEnum.ISSUER]
+
     @extend_response(CanvaAuthorizeUrlSerializer())
     def get(self, request):
         try:
@@ -36,6 +39,8 @@ class CanvaConnectAV(BaseAV):
 @method_decorator(transaction.non_atomic_requests, name="dispatch")
 class CanvaCallbackAV(BaseAV):
     "Finish connecting: exchange the code Canva redirected back with"
+
+    roles = [RoleEnum.ISSUER]
 
     @extend_schema(request=CanvaCallbackSerializer)
     @extend_response(DefaultSuccessResponseType)
@@ -55,6 +60,8 @@ class CanvaCallbackAV(BaseAV):
 class CanvaStatusAV(BaseAV):
     "Whether the user has a Canva account connected"
 
+    roles = [RoleEnum.ISSUER]
+
     @extend_response(CanvaStatusSerializer())
     def get(self, request):
         try:
@@ -66,6 +73,8 @@ class CanvaStatusAV(BaseAV):
 @method_decorator(transaction.non_atomic_requests, name="dispatch")
 class CanvaConnectionAV(BaseAV):
     "Disconnect the user's Canva account"
+
+    roles = [RoleEnum.ISSUER]
 
     @extend_response(DefaultSuccessResponseType)
     def delete(self, request):
@@ -79,6 +88,8 @@ class CanvaConnectionAV(BaseAV):
 @method_decorator(transaction.non_atomic_requests, name="dispatch")
 class CanvaDesignsAV(BaseAV):
     "List or search the user's Canva designs"
+
+    roles = [RoleEnum.ISSUER]
 
     @extend_schema(
         parameters=[
