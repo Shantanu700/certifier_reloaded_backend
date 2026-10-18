@@ -219,6 +219,8 @@ SPECTACULAR_SETTINGS = {
     # redoc@latest is 3.x, whose standalone bundle uses `import.meta` and throws a
     # SyntaxError when loaded by drf-spectacular's classic <script> tag.
     "REDOC_DIST": "https://cdn.jsdelivr.net/npm/redoc@2.5.4",
+    # Without this the box `type` enum gets a hash-suffixed name (Type093Enum) in generated clients.
+    "ENUM_NAME_OVERRIDES": {"BoxTypeEnum": "modules.certificates.choices.BoxTypeChoices"},
     "SWAGGER_UI_SETTINGS": {
         "defaultModelsExpandDepth": -1,
         "displayRequestDuration": True,

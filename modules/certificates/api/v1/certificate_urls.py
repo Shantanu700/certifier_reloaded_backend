@@ -4,12 +4,17 @@ from modules.certificates.api.v1.views import (
     GeneratedCertificateDetailAV,
     GeneratedCertificateRevokeAV,
     ReceivedCertificateAV,
+    VerifyCertificateAV,
 )
 
 urlpatterns = [
     path(
         "",
         ReceivedCertificateAV.as_view(),
+    ),
+    path(
+        "verify/<str:code>/",
+        VerifyCertificateAV.as_view(),
     ),
     path(
         "<uuid:uuid>/",

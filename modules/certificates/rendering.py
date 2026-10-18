@@ -2,16 +2,18 @@ from dataclasses import dataclass
 from io import BytesIO
 
 import pymupdf as fitz
+import segno
 from django.core.files.base import ContentFile
 from PIL import Image, ImageDraw, ImageFont
 
 from base.enums import StorageProvider
 from base.validators import validate_with_schema
-from modules.certificates.choices import TextAlignChoices
+from modules.certificates.choices import MAPPABLE_BOX_TYPES, QR_BOX_TYPES, BoxTypeChoices, TextAlignChoices
 from modules.certificates.fonts import BUNDLED_FONTS
 from modules.certificates.models import GeneratedCertificate
 from modules.certificates.naming import resolve_filename
 from modules.certificates.schemas import RowDataSchema
+from modules.certificates.verification import format_code, new_code, verify_url
 from modules.core.models import UploadFile
 
 MIN_FONT_SIZE = 8
@@ -31,6 +33,7 @@ class RenderBox:
     font_size: int
     font_color: str
     alignment: str
+    type: str
 
 
 @dataclass
@@ -72,6 +75,7 @@ def _scale_box(box, scale: float) -> RenderBox:
         font_size=max(round(box.font_size * scale), MIN_FONT_SIZE),
         font_color=box.font_color,
         alignment=box.alignment,
+        type=box.type,
     )
 
 
@@ -123,12 +127,36 @@ def fit_font_size(draw, text, font_path, box_width, box_height, max_size, min_si
     return best
 
 
+def draw_qr(image: Image.Image, box, data: str) -> str | None:
+    "Paste a QR code of `data` centred in the box, in `font_color` on a transparent background. Returns a warning, if any."
+    try:
+        qr = segno.make(data, error="m")
+    except segno.DataOverflowError:
+        raise ValueError(f"The text for QR box '{box.key}' is too long for a QR code.")
+    modules = qr.symbol_size(scale=1, border=1)[0]
+    side = min(box.width, box.height)
+    buffer = BytesIO()
+    # Whole-pixel modules keep the edges sharp enough to scan.
+    qr.save(buffer, kind="png", scale=max(1, int(side // modules)), border=1, dark=box.font_color, light=None)
+    buffer.seek(0)
+    code = Image.open(buffer).convert("RGBA")
+    image.paste(code, (round(box.x + (box.width - code.width) / 2), round(box.y + (box.height - code.height) / 2)), code)
+    if side < modules:
+        return f"QR box '{box.key}' is too small for its content; make it at least {modules} px square."
+    return None
+
+
 def draw_boxes(image: Image.Image, boxes, values: dict[str, str]) -> tuple[Image.Image, list[str]]:
     "Stamp `values[box.key]` into each box, shrinking font size to fit that box only. Returns (image, overflow_warnings)."
     draw = ImageDraw.Draw(image)
     warnings = []
     for box in boxes:
         text = values.get(box.key, "")
+        if box.type in QR_BOX_TYPES:
+            warning = draw_qr(image, box, text) if text else None
+            if warning:
+                warnings.append(warning)
+            continue
         font_path = BUNDLED_FONTS[box.font]
         size = fit_font_size(draw, text, font_path, box.width, box.height, box.font_size)
         font = ImageFont.truetype(str(font_path), size)
@@ -164,10 +192,23 @@ def render_pdf_template(
     return draw_boxes(image, [_scale_box(box, scale) for box in boxes], values)
 
 
-def render_file(batch, index: int, row: dict, boxes, image_boxes) -> tuple[UploadFile, list[str]]:
+def box_values(batch, row: dict, boxes, code: str) -> dict[str, str]:
+    "What each box prints: its mapped CSV value, or for verify_* boxes the certificate's code or verify link."
+    values = {}
+    for box in boxes:
+        if box.type in MAPPABLE_BOX_TYPES:
+            values[box.key] = row.get(batch.mapping.get(box.key, ""), "")
+        elif box.type == BoxTypeChoices.VERIFY_CODE:
+            values[box.key] = format_code(code)
+        else:
+            values[box.key] = verify_url(code)
+    return values
+
+
+def render_file(batch, index: int, row: dict, boxes, image_boxes, code: str) -> tuple[UploadFile, list[str]]:
     "Renders and uploads one certificate for `row` (values already str); raises on failure. Returns the file and font warnings."
     validate_with_schema(RowDataSchema, row)
-    values = {box.key: row.get(batch.mapping.get(box.key, ""), "") for box in boxes}
+    values = box_values(batch, row, boxes, code)
 
     is_pdf = batch.template.file.original_filename.lower().endswith(".pdf")
     with batch.template.file.open() as fh:
@@ -193,8 +234,9 @@ def render_file(batch, index: int, row: dict, boxes, image_boxes) -> tuple[Uploa
 def generate_certificate_for_row(batch, index: int, row: dict, boxes, image_boxes) -> "GeneratedCertificate":
     "Renders one certificate for `row` and records the outcome; never raises -- failures land on the returned row."
     row = {key: (value or "") for key, value in row.items()}
+    code = new_code()
     try:
-        upload, warnings = render_file(batch, index, row, boxes, image_boxes)
+        upload, warnings = render_file(batch, index, row, boxes, image_boxes, code)
         return GeneratedCertificate.objects.create(
             batch=batch,
             row_index=index,
@@ -202,6 +244,7 @@ def generate_certificate_for_row(batch, index: int, row: dict, boxes, image_boxe
             file=upload,
             is_successful=True,
             error_message="; ".join(warnings),
+            verification_code=code,
         )
     except Exception as exc:
         return GeneratedCertificate.objects.create(
@@ -210,4 +253,5 @@ def generate_certificate_for_row(batch, index: int, row: dict, boxes, image_boxe
             row_data=row,
             is_successful=False,
             error_message=str(exc),
+            verification_code=code,
         )

@@ -6,6 +6,7 @@ from base.defaults import DEFAULT_ON_DELETE
 from base.enums import Status
 from base.model import ModelBase
 from modules.certificates.choices import (
+    BoxTypeChoices,
     CertificateBatchStatusChoices,
     ExportStatusChoices,
     IssueStatusChoices,
@@ -47,6 +48,8 @@ class TemplateBox(ModelBase):
     font_size = models.PositiveIntegerField(default=32)
     font_color = models.CharField(max_length=7, default="#000000")
     alignment = models.CharField(max_length=6, choices=TextAlignChoices.choices, default=TextAlignChoices.CENTER)
+    # QR types draw a QR code in `font_color`; font, size and alignment only apply to text and the verification code.
+    type = models.CharField(max_length=12, choices=BoxTypeChoices.choices, default=BoxTypeChoices.TEXT)
 
     class Meta(ModelBase.Meta):
         constraints = [
@@ -121,3 +124,5 @@ class GeneratedCertificate(ModelBase):
     match_error = models.CharField(max_length=255, blank=True, default="", help_text="Why matching left it unassigned.")
     issued_at = models.DateTimeField(null=True, blank=True)
     revoked_at = models.DateTimeField(null=True, blank=True)
+    # Printed by verify_* boxes and looked up by the public verify page. Null on certificates made before it existed.
+    verification_code = models.CharField(max_length=12, unique=True, null=True, blank=True)

@@ -43,8 +43,10 @@ from modules.certificates.api.v1.serializers import (
     TemplateImageBoxCreateSerializer,
     TemplateImageBoxSerializer,
     TemplateImageBoxUpdateSerializer,
+    VerifiedCertificateSerializer,
 )
 from modules.certificates.choices import (
+    MAPPABLE_BOX_TYPES,
     CertificateBatchStatusChoices,
     ExportStatusChoices,
     IssueStatusChoices,
@@ -62,6 +64,7 @@ from modules.certificates.tasks import (
     export_certificates_task,
     generate_certificates_task,
 )
+from modules.certificates.verification import normalise_code
 from modules.core.models import UploadFile
 
 # Write your views here
@@ -550,7 +553,7 @@ class CertificateBatchMappingAV(BaseAV):
 
         mapping = serializer.validated_data["mapping"]
 
-        box_keys = set(batch.template.boxes.values_list("key", flat=True))
+        box_keys = set(batch.template.boxes.filter(type__in=MAPPABLE_BOX_TYPES).values_list("key", flat=True))
         unknown_boxes = set(mapping) - box_keys
         if unknown_boxes:
             self.fail(f"Unknown box key(s): {', '.join(sorted(unknown_boxes))}.")
@@ -926,3 +929,30 @@ class ReceivedCertificateAV(BaseAV):
         page = paginator.paginate_queryset(queryset, request)
         serializer = ReceivedCertificateSerializer(page, many=True, context={"request": request})
         return paginator.get_paginated_response(serializer.data)
+
+
+class VerifyCertificateAV(BaseAV):
+    "Public: check a certificate by the verification code printed on it"
+
+    authentication = False
+
+    @extend_schema(operation_id="verify_certificate")
+    @extend_response(VerifiedCertificateSerializer())
+    def get(self, request, code):
+        # ponytail: no throttle; the 60-bit random code can't be guessed. Rate-limit at the proxy if it gets probed.
+        normalised = normalise_code(code)
+        certificate = (
+            GeneratedCertificate.objects.filter(
+                verification_code=normalised,
+                issue_status__in=(IssueStatusChoices.ISSUED, IssueStatusChoices.REVOKED),
+            )
+            .exclude(batch__status=Status.DELETED)
+            .exclude(batch__template__status=Status.DELETED)
+            .select_related("batch__template", "batch__owner", "recipient")
+            .first()
+            if normalised
+            else None
+        )
+        if certificate is None:
+            self.fail("No issued certificate has this code. Check it and try again.")
+        return VerifiedCertificateSerializer(instance=certificate).data
