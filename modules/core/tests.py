@@ -1,9 +1,10 @@
+import base64
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
 from django.core import mail
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import Client, TestCase
 from rest_framework.test import APIClient
 
 from modules.core.models import User
@@ -103,3 +104,33 @@ class ProfileTests(TestCase):
         user.refresh_from_db()
         self.assertEqual((user.phone, user.role, user.roll_number), ("9876543210", "recipient", "R1"))
         self.assertEqual(client.put("/core/profile/", {"phone": "12345"}, format="json").status_code, 418)
+
+
+class CrossSiteTests(TestCase):
+    "Plain test clients skip CSRF; enforce_csrf_checks=True behaves like a real browser or server caller."
+
+    def setUp(self):
+        self.user = User.objects.create_user("asha", "asha@example.com", "Sturdy-pass-91", is_staff=True, is_superuser=True)
+        self.client = Client(enforce_csrf_checks=True)
+
+    def login(self):
+        basic = base64.b64encode(b"asha:Sturdy-pass-91").decode()
+        return self.client.post("/core/login/", HTTP_AUTHORIZATION=f"Basic {basic}")
+
+    def test_session_cookie_is_lax(self):
+        r = self.login()
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.cookies["sessionid"]["samesite"], "Lax")
+
+    def test_api_takes_a_session_without_a_csrf_token(self):
+        # How the frontend's server calls: the session cookie, no token, no Origin.
+        self.login()
+        self.assertEqual(self.client.delete("/core/login/").status_code, 200)
+
+    def test_admin_still_needs_a_csrf_token(self):
+        r = self.client.post("/admin/login/", {"username": "asha", "password": "Sturdy-pass-91"})
+        self.assertEqual(r.status_code, 403)
+
+    def test_no_cors_headers_for_other_sites(self):
+        r = self.client.get("/core/login/", HTTP_ORIGIN="https://evil.example")
+        self.assertNotIn("Access-Control-Allow-Origin", r.headers)

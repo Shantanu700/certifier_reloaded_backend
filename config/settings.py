@@ -29,17 +29,16 @@ DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
 
-CORS_ALLOW_HEADERS = ["ngrok-skip-browser-warning", "content-type", "Authorization"]
-
-CORS_ALLOW_ALL_ORIGINS = True
-
-CORS_ALLOW_CREDENTIALS = True
-
 SESSION_COOKIE_HTTPONLY = True
 
-SESSION_COOKIE_SAMESITE = "None"
+# Lax: browsers don't send the session on cross-site POST/PUT/DELETE or fetch. Only the frontend's server
+# calls the API with it (see base.authentication.ServerSessionAuthentication), so nothing needs it cross-site.
+SESSION_COOKIE_SAMESITE = "Lax"
 
 SESSION_COOKIE_SECURE = True
+
+# Only needed when the admin is served behind a proxy under another host, e.g. https://api.example.com
+CSRF_TRUSTED_ORIGINS = [origin for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if origin]
 
 ALLOWED_IMG_TYPES = {"jpeg": "image/jpeg", "jpg": "image/jpeg", "png": "image/png"}
 
@@ -110,7 +109,6 @@ DJANGO_APPS = [
 
 THIRD_PARTY_APPS = [
     "rest_framework",
-    "corsheaders",
     "drf_spectacular",
     "sslserver",
 ]
@@ -127,7 +125,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "config.middleware.DisableCSRFMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -202,7 +200,7 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "base.openapi.BaseSchema",
     "EXCEPTION_HANDLER": "base.exceptions.exception_handler",
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
+        "base.authentication.ServerSessionAuthentication",
     ],
 }
 

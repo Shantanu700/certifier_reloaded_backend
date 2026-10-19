@@ -59,7 +59,7 @@ All models inherit `ModelBase`: `uuid` (uuid6), `status`, `created_at`, `updated
 
 ### Auth
 
-`AUTH_USER_MODEL = "core.User"` — a custom user model (`ModelBase` + `AbstractUser`, keyed on `username`), with its own `USER_MODEL_FIELDS` tuple used to exclude auth internals (`is_superuser`, `groups`, `password`, ...) from serializers, and `UserManager` layered on the soft-delete manager. Session authentication only; `LoginAV` (`modules/core/api/v1/views.py`) takes a Basic `Authorization` header (base64 `username:password`, decoded manually — not a JSON body): `GET` = whoami, `POST` = login (calls `django.contrib.auth.login`), `DELETE` = logout. CSRF is globally disabled by `config/middleware.DisableCSRFMiddleware`, and CORS is wide open — both are dev settings that belong to the current nonprod-only setup.
+`AUTH_USER_MODEL = "core.User"` — a custom user model (`ModelBase` + `AbstractUser`, keyed on `username`), with its own `USER_MODEL_FIELDS` tuple used to exclude auth internals (`is_superuser`, `groups`, `password`, ...) from serializers, and `UserManager` layered on the soft-delete manager. Session authentication only; `LoginAV` (`modules/core/api/v1/views.py`) takes a Basic `Authorization` header (base64 `username:password`, decoded manually — not a JSON body): `GET` = whoami, `POST` = login (calls `django.contrib.auth.login`), `DELETE` = logout. Only the frontend's server calls the API with a session (it forwards the session id it keeps in its own cookie), so `base/authentication.ServerSessionAuthentication` skips DRF's CSRF check; Django's `CsrfViewMiddleware` still protects the admin. There is no CORS: no browser calls the API cross-origin.
 
 `ATOMIC_REQUESTS = True`: every request is one transaction, so raising (including `self.fail`) rolls back the whole request.
 
@@ -70,10 +70,10 @@ All models inherit `ModelBase`: `uuid` (uuid6), `status`, `created_at`, `updated
 ### Notable settings (`config/settings.py`)
 
 - `REST_FRAMEWORK.DEFAULT_SCHEMA_CLASS = base.openapi.BaseSchema` — the `AutoSchema` subclass behind the OpenAPI generation.
-- Session cookies are `HTTPONLY`, `SAMESITE=None`, `SECURE=True` — cross-site cookies over HTTPS are expected even in dev, which is why `runsslserver` exists.
-- CORS allows credentials (`CORS_ALLOW_CREDENTIALS=True`) with an explicit `CORS_ALLOW_HEADERS` allowlist, not a blanket wildcard.
+- Session cookies are `HTTPONLY`, `SAMESITE=Lax`, `SECURE=True` — Lax keeps them off cross-site requests (the CSRF defence for the API); `SECURE` is why logging into the backend directly (admin, Swagger) needs `runsslserver`.
+- `CSRF_TRUSTED_ORIGINS` (comma-separated, from `.env`) is only needed when the admin sits behind a proxy under another host.
 - File-upload limits for `UploadFile` (`MAX_FILE_SIZE` = 1MB, `ALLOWED_IMG_TYPES`, `ALLOWED_CSV_TYPES`) are enforced at the settings level.
 
 ### Tooling caveat
 
-No linter/formatter or test framework is actually configured in `pyproject.toml` — the devcontainer lists a `ruff` VS Code extension, but it isn't wired into the project. `modules/core/tests.py` is an empty stub; there is effectively no test coverage yet.
+No linter/formatter or test framework is actually configured in `pyproject.toml` — the devcontainer lists a `ruff` VS Code extension, but it isn't wired into the project. Tests live in each module's `tests.py` (`modules/core`, `modules/certificates`) and run with `uv run manage.py test modules.<app>.tests`.
