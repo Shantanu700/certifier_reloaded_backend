@@ -44,14 +44,18 @@ class LoginAV(BaseAV):
     throttle_classes = [LoginRateThrottle]
 
     def decrypt_auth(self, meta_info) -> dict[str, Any]:
-        header, data = meta_info.split(" ")
+        "username and password from a Basic Authorization header; {} when it's missing or malformed."
+        try:
+            header, data = (meta_info or "").split(" ", 1)
+            # Only the first colon separates them: passwords may contain colons.
+            username, password = base64.b64decode(data, validate=True).decode("utf-8").split(":", 1)
+        except (ValueError, UnicodeDecodeError):  # a bad base64 string raises binascii.Error, a ValueError
+            return {}
         if header != "Basic":
             return {}
-        decrypted_auth = base64.b64decode(data).decode("utf-8")
-        credentials = decrypted_auth.split(":")
         return {
-            "username": credentials[0],
-            "password": credentials[1],
+            "username": username,
+            "password": password,
         }
 
     @extend_response(LoginSerializer())

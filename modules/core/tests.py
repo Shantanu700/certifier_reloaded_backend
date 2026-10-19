@@ -179,3 +179,25 @@ class RateLimitTests(TestCase):
     def test_forwarded_address_is_ignored_unless_trusted(self):
         with trusting_proxies(0):  # a made-up address per request doesn't dodge the limit
             self.assertEqual([self.verify(f"203.0.113.{n}") for n in range(3)], [409, 409, 429])
+
+
+class LoginTests(TestCase):
+    def setUp(self):
+        cache.clear()  # login attempts are rate-limited per username
+        # Server errors come back as a 500 response instead of being raised into the test.
+        self.client = Client(raise_request_exception=False)
+
+    def login(self, header):
+        return self.client.post("/core/login/", **({"HTTP_AUTHORIZATION": header} if header else {}))
+
+    def basic(self, credentials):
+        return "Basic " + base64.b64encode(credentials.encode()).decode()
+
+    def test_password_with_a_colon_logs_in(self):
+        User.objects.create_user("asha", "asha@example.com", "pa:ss:word-91")
+        self.assertEqual(self.login(self.basic("asha:pa:ss:word-91")).status_code, 201)
+
+    def test_missing_or_garbled_credentials_are_a_400(self):
+        for header in (None, "Basic", "Basic not-base64!", self.basic("no-colon"), "Bearer abc"):
+            with self.subTest(header=header):
+                self.assertEqual(self.login(header).status_code, 400)
