@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: certifier
+          POSTGRES_USER: certifier
+          POSTGRES_PASSWORD: certifier
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U certifier -d certifier"
+          --health-interval 2s
+          --health-retries 30
+    env:
+      SECRET_KEY: ci-only-not-a-secret
+      POSTGRES_DB: certifier
+      POSTGRES_USER: certifier
+      POSTGRES_PASSWORD: certifier
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Make migrations (they aren't committed)
+        run: uv run manage.py makemigrations
+      - run: uv run manage.py check
+      - name: Test
+        run: uv run manage.py test modules.core.tests modules.certificates.tests

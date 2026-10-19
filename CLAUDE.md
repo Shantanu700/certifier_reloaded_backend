@@ -82,4 +82,4 @@ All models inherit `ModelBase`: `uuid` (uuid6), `status`, `created_at`, `updated
 
 ### Tooling caveat
 
-No linter/formatter or test framework is actually configured in `pyproject.toml` — the devcontainer lists a `ruff` VS Code extension, but it isn't wired into the project. Tests live in each module's `tests.py` (`modules/core`, `modules/certificates`) and run with `uv run manage.py test modules.<app>.tests`.
+Lint is ruff (a pinned dev dependency), limited on purpose to `E4`/`E7`/`E9`/`F` in `pyproject.toml`: run `uv run ruff check .`. There's no formatter check yet (`ruff format` would rewrite ~35 files). CI (`.github/workflows/ci.yml`) runs ruff, `makemigrations` (migrations aren't committed), `check` and the tests against Postgres on every PR. Tests live in each module's `tests.py` (`modules/core`, `modules/certificates`) and run with `uv run manage.py test modules.<app>.tests`.
