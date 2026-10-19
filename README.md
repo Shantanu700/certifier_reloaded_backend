@@ -132,7 +132,10 @@ Generation status: `pending → mapped → queued → processing → completed |
 
 ## Tests
 
+CI runs ruff and these tests against Postgres on every pull request (`.github/workflows/ci.yml`).
+
 ```bash
+uv run ruff check .
 uv run manage.py test modules.core.tests modules.certificates.tests
 # or, with the compose stack running:
 docker compose exec web python manage.py test modules.core.tests modules.certificates.tests
