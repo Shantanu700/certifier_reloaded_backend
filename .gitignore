@@ -15,3 +15,5 @@ wheels/
 .env
 
 media/
+# Local MCP server config (names personal accounts)
+.mcp.json
