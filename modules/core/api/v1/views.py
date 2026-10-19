@@ -17,6 +17,7 @@ from base.decorators import extend_response
 from base.enums import RoleEnum, StorageProvider
 from base.exceptions import SerializerError
 from base.storage import StorageError, get_storage_service
+from base.throttles import AddressRateThrottle, LoginRateThrottle
 from base.types import DefaultSuccessResponseType
 from base.views import BaseAV
 from modules.core.api.v1.serializers import (
@@ -40,6 +41,7 @@ class LoginAV(BaseAV):
     authentication = {
         "post": False,
     }
+    throttle_classes = [LoginRateThrottle]
 
     def decrypt_auth(self, meta_info) -> dict[str, Any]:
         header, data = meta_info.split(" ")
@@ -70,7 +72,7 @@ class LoginAV(BaseAV):
                 examples=[
                     OpenApiExample(
                         name="User Authentication",
-                        value="Basic ZXJwQGtpZXQuZWR1OkBlcnA=",
+                        value="Basic ZGVtb19pc3N1ZXI6eW91ci1wYXNzd29yZA==",  # demo_issuer:your-password
                         summary="base64 encoded credentials are required",
                         description="",
                     )
@@ -109,6 +111,8 @@ class RegisterAV(BaseAV):
     authentication = {
         "post": False,
     }
+    throttle_classes = [AddressRateThrottle]
+    throttle_scope = "signup"
 
     @extend_schema(request=RegisterSerializer)
     @extend_response(LoginSerializer())

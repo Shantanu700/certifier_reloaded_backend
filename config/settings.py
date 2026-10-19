@@ -25,21 +25,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ["SECRET_KEY"]
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Off unless .env says DEBUG=1: debug pages show stack traces and settings to anyone.
+DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
-ALLOWED_HOSTS = ["*"]
-
-CORS_ALLOW_HEADERS = ["ngrok-skip-browser-warning", "content-type", "Authorization"]
-
-CORS_ALLOW_ALL_ORIGINS = True
-
-CORS_ALLOW_CREDENTIALS = True
+# Comma-separated hostnames the API is served under. Empty is fine with DEBUG on (localhost only).
+ALLOWED_HOSTS = [host for host in os.environ.get("ALLOWED_HOSTS", "").split(",") if host]
 
 SESSION_COOKIE_HTTPONLY = True
 
-SESSION_COOKIE_SAMESITE = "None"
+# Lax: browsers don't send the session on cross-site POST/PUT/DELETE or fetch. Only the frontend's server
+# calls the API with it (see base.authentication.ServerSessionAuthentication), so nothing needs it cross-site.
+SESSION_COOKIE_SAMESITE = "Lax"
 
 SESSION_COOKIE_SECURE = True
+
+# Only needed when the admin is served behind a proxy under another host, e.g. https://api.example.com
+CSRF_TRUSTED_ORIGINS = [origin for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if origin]
 
 ALLOWED_IMG_TYPES = {"jpeg": "image/jpeg", "jpg": "image/jpeg", "png": "image/png"}
 
@@ -110,7 +111,6 @@ DJANGO_APPS = [
 
 THIRD_PARTY_APPS = [
     "rest_framework",
-    "corsheaders",
     "drf_spectacular",
     "sslserver",
 ]
@@ -127,7 +127,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "config.middleware.DisableCSRFMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -202,9 +202,28 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "base.openapi.BaseSchema",
     "EXCEPTION_HANDLER": "base.exceptions.exception_handler",
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
+        "base.authentication.ServerSessionAuthentication",
     ],
+    # Every request comes from the frontend's server, so the visitor's address is in the X-Forwarded-For it
+    # forwards. Trust it only when .env says how many proxies append to it (1: just the frontend's host);
+    # 0 ignores it and uses the frontend server's own address.
+    "NUM_PROXIES": int(os.environ.get("NUM_PROXIES", "0")),
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "10/hour",  # per username tried (base.throttles.LoginRateThrottle)
+        "signup": "100/hour",  # per visitor address; generous because a campus shares one address
+        "verify": "120/min",  # per visitor address
+    },
 }
+
+# Rate limits and the email-resend limit live in the cache. The default is per process, so with several
+# server processes point it at Redis.
+if os.environ.get("REDIS_CACHE_URL"):
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": os.environ["REDIS_CACHE_URL"],
+        }
+    }
 
 MEDIA_URL = "/media/"
 
