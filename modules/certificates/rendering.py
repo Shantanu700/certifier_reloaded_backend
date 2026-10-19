@@ -205,7 +205,9 @@ def box_values(batch, row: dict, boxes, code: str) -> dict[str, str]:
     return values
 
 
-def render_file(batch, index: int, row: dict, boxes, image_boxes, code: str) -> tuple[UploadFile, list[str]]:
+def render_file(
+    batch, index: int, row: dict, boxes, image_boxes, code: str, provider: str = StorageProvider.CLOUDINARY
+) -> tuple[UploadFile, list[str]]:
     "Renders and uploads one certificate for `row` (values already str); raises on failure. Returns the file and font warnings."
     validate_with_schema(RowDataSchema, row)
     values = box_values(batch, row, boxes, code)
@@ -227,7 +229,7 @@ def render_file(batch, index: int, row: dict, boxes, image_boxes, code: str) -> 
         image.save(buffer, format="PNG")
         filename = f"{base_name}.png"
 
-    upload = UploadFile.upload(ContentFile(buffer.getvalue(), name=filename), provider=StorageProvider.CLOUDINARY)
+    upload = UploadFile.upload(ContentFile(buffer.getvalue(), name=filename), provider=provider)
     return upload, warnings
 
 

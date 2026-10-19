@@ -1,6 +1,9 @@
+import tempfile
 from datetime import date
+from io import StringIO
 from unittest import mock
 
+from django.core.management import CommandError, call_command
 from django.test import TestCase, override_settings
 from PIL import Image
 from rest_framework.test import APIClient
@@ -17,7 +20,7 @@ def upload(name="file.png"):
     return UploadFile.objects.create(key=name, url=f"https://files.example.com/{name}", original_filename=name)
 
 
-def fake_render(batch, index, row, boxes, image_boxes, code):
+def fake_render(batch, index, row, boxes, image_boxes, code, provider=None):
     return upload(f"certificate_{index}.png"), []
 
 
@@ -281,3 +284,33 @@ class CanvaTemplateTests(TestCase):
         name, scan = TemplateBox.objects.order_by("key")
         self.assertEqual((name.x, name.y, name.width, name.height, name.font_size), (20, 40, 600, 82, 64))
         self.assertEqual((scan.width, scan.height), (198, 198))
+
+
+@mock.patch("modules.certificates.services.render_file", fake_render)
+@override_settings(DEBUG=True, MEDIA_ROOT=tempfile.mkdtemp())
+class SeedFixturesTests(TestCase):
+    def counts(self):
+        issued = GeneratedCertificate.objects.filter(batch__template__owner__username="demo_issuer")
+        return {
+            "students": User.objects.filter(role="recipient", username__startswith="student", email_verified=True).count(),
+            "templates": CertificateTemplate.objects.filter(owner__username="demo_issuer").count(),
+            "issued": issued.filter(issue_status="issued").count(),
+            "revoked": issued.filter(issue_status="revoked").count(),
+        }
+
+    def test_seeds_once_and_reset_replaces_only_its_own_data(self):
+        other = User.objects.create_user("someone", "someone@example.com", "x", role="issuer")
+        CertificateTemplate.objects.create(name="Not seed data", file=upload(), owner=other)
+
+        call_command("seed_fixtures", stdout=StringIO())
+        expected = {"students": 50, "templates": 3, "issued": 88, "revoked": 2}
+        self.assertEqual(self.counts(), expected)
+        student = User.objects.get(username="student01")
+        self.assertTrue(GeneratedCertificate.objects.filter(recipient=student, issue_status="issued").exists())
+
+        with self.assertRaises(CommandError):
+            call_command("seed_fixtures", stdout=StringIO())
+        call_command("seed_fixtures", "--if-empty", stdout=StringIO())
+        call_command("seed_fixtures", "--reset", stdout=StringIO())
+        self.assertEqual(self.counts(), expected)
+        self.assertTrue(CertificateTemplate.objects.filter(name="Not seed data").exists())
