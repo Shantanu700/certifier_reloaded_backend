@@ -4,14 +4,38 @@ Django + DRF API for certificate templates and batch certificate generation (ren
 
 Frontend: [certifier_reloaded_frontend](https://github.com/Shantanu700/certifier_reloaded_frontend)
 
-## Requirements
+## Quick start (Docker)
+
+Needs only Docker. From the repo root:
+
+```bash
+docker compose up
+```
+
+This starts Postgres, Redis, [Floci](https://github.com/floci-io/floci) (a local AWS standing in for S3), the API on <http://localhost:8000> and a Celery worker. A one-off `init` step creates the storage bucket, the database schema and demo data:
+
+- Issuer: `demo_issuer`, with three certificate templates
+- Students: `student01` to `student50`, each holding certificates
+- Password for all of them: `demo-password`
+
+Then run the [frontend](https://github.com/Shantanu700/certifier_reloaded_frontend) with `NEXT_PUBLIC_API_URL=http://localhost:8000` in its `.env.local` and sign in at <http://localhost:3000>.
+
+- Port 8000 taken? `API_PORT=8040 docker compose up`, and point the frontend at that port instead.
+- Code changes apply live (the source is mounted); `docker compose up --build` after changing dependencies.
+- `docker compose down -v` deletes everything, including the database and stored files.
+- Offline, the browser can't resolve `localhost.floci.io` (Floci's address, which public DNS points at `127.0.0.1`): add `127.0.0.1 localhost.floci.io` to `/etc/hosts`.
+- Canva import and Google sign-in stay off until you add their keys (see `.env.sample`).
+
+## Manual setup
+
+### Requirements
 
 - Python 3.13 and [uv](https://docs.astral.sh/uv/)
 - PostgreSQL
 - Redis (Celery broker / result backend)
 - S3-compatible bucket or Cloudinary account for file storage
 
-## Setup
+### Setup
 
 ```bash
 cp .env.sample .env        # then fill in values
@@ -23,17 +47,17 @@ uv run manage.py createsuperuser
 
 Django does not load `.env` on its own. Inside the devcontainer it comes from `docker/nonprod/docker-compose.yaml`; elsewhere, export it first (`set -a; source .env; set +a`).
 
-## Run
+### Run
 
 ```bash
 uv run manage.py runsslserver 0.0.0.0:8001   # HTTPS; session cookies are Secure
-uv run manage.py runserver 0.0.0.0:8000      # plain HTTP (login cookies won't stick)
+uv run manage.py runserver 0.0.0.0:8000      # plain HTTP: set SESSION_COOKIE_SECURE=0 to log into admin/Swagger
 uv run celery -A config worker -l info       # required for certificate generation
 ```
 
 API docs: `/api/schema/swagger-ui/` and `/api/schema/redoc/`.
 
-## Devcontainer
+### Devcontainer
 
 Open in VS Code and "Reopen in Container". The container joins the external `dev_db_network`, so create it and have Postgres running on it first:
 
@@ -109,7 +133,9 @@ Generation status: `pending → mapped → queued → processing → completed |
 ## Tests
 
 ```bash
-uv run manage.py test
+uv run manage.py test modules.core.tests modules.certificates.tests
+# or, with the compose stack running:
+docker compose exec web python manage.py test modules.core.tests modules.certificates.tests
 ```
 
 See [CLAUDE.md](CLAUDE.md) for architecture and conventions (`base/` framework, soft deletes, error shapes).

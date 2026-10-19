@@ -21,7 +21,10 @@ uv run celery -A config worker -l info      # certificate generation runs as a b
 
 Interactive docs: `/api/schema/swagger-ui/` and `/api/schema/redoc/`.
 
-Dev environment is a VS Code devcontainer over `docker/nonprod/docker-compose.yaml`. The container idles (`sleep`); you start the server yourself. It joins the external `dev_db_network` and expects Postgres reachable at the `.env` host — `docker network create dev_db_network` and a running Postgres are prerequisites. `docker-compose.yaml` also runs a `redis` service (Celery broker/result backend, `CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND` in `.env`) — no external prerequisite needed for it, unlike Postgres.
+Two Docker setups:
+
+- **`compose.yaml` (repo root)** — the self-contained one for contributors: `docker compose up` runs Postgres, Redis, Floci (local AWS; S3 at `http://localhost.floci.io:4566`), the API (`runserver`, port `API_PORT`, default 8000) and a Celery worker, all configured inline (no `.env`). A one-shot `init` service runs `create_bucket` (`modules/core/management/commands/`), `makemigrations`, `migrate` and `seed_fixtures --if-empty`. `localhost.floci.io` resolves to 127.0.0.1 in public DNS and is a network alias of the Floci container, so presigned URLs work from both the browser and the containers. The `Dockerfile` holds only dependencies (`/opt/venv`); the source is mounted.
+- **`docker/nonprod/docker-compose.yaml`** — the maintainer's VS Code devcontainer. The container idles (`sleep`); you start the server yourself. It reads `.env` (only when the container is *created* — restart doesn't reload it), joins the external `dev_db_network` and expects Postgres and Redis already running on it.
 
 **Migrations are gitignored** (`**/migrations/**`), so a fresh clone must `makemigrations` before `migrate`.
 
@@ -72,6 +75,7 @@ All models inherit `ModelBase`: `uuid` (uuid6), `status`, `created_at`, `updated
 - `REST_FRAMEWORK.DEFAULT_SCHEMA_CLASS = base.openapi.BaseSchema` — the `AutoSchema` subclass behind the OpenAPI generation.
 - Session cookies are `HTTPONLY`, `SAMESITE=Lax`, `SECURE=True` — Lax keeps them off cross-site requests (the CSRF defence for the API); `SECURE` is why logging into the backend directly (admin, Swagger) needs `runsslserver`.
 - `CSRF_TRUSTED_ORIGINS` (comma-separated, from `.env`) is only needed when the admin sits behind a proxy under another host.
+- `CERTIFICATE_STORAGE` (`cloudinary` default, `s3` or `local`) is where rendered certificates go; `IssuanceService.storage_provider` can override it per instance (the seed uses `local`). `SESSION_COOKIE_SECURE` defaults on; compose turns it off (plain http).
 - `DEBUG` and `ALLOWED_HOSTS` come from `.env`; `DEBUG` is off unless set (`DEBUG=1` for dev — media serving and `seed_fixtures` need it).
 - Rate limits (`base/throttles.py`, rates in `REST_FRAMEWORK.DEFAULT_THROTTLE_RATES`): login per username tried (`LoginRateThrottle`), sign-up and public verify per visitor address (`AddressRateThrottle` + `throttle_scope`). Every request arrives from the frontend's server, so the visitor address comes from the `X-Forwarded-For` it forwards, trusted only per `NUM_PROXIES` in `.env`. Limits live in the cache: per process unless `REDIS_CACHE_URL` is set.
 - File-upload limits for `UploadFile` (`MAX_FILE_SIZE` = 1MB, `ALLOWED_IMG_TYPES`, `ALLOWED_CSV_TYPES`) are enforced at the settings level.
