@@ -17,3 +17,6 @@ wheels/
 media/
 # Local MCP server config (names personal accounts)
 .mcp.json
+
+# collectstatic output
+staticfiles/

@@ -1,9 +1,11 @@
 [project]
 name = "certifier-reloaded"
 version = "0.1.0"
-description = "Add your description here"
+description = "Django API for designing, issuing and verifying certificates"
 readme = "README.md"
 requires-python = ">=3.13"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
 dependencies = [
     "boto3>=1.34",
     "celery>=5.6.3",
@@ -14,6 +16,7 @@ dependencies = [
     "djangorestframework>=3.16.1",
     "drf-spectacular>=0.29.0",
     "google-auth[requests]>=2.0",
+    "gunicorn>=23",
     "pillow>=12.3.0",
     "psycopg2-binary>=2.9.11",
     "pydantic>=2.12.5",
@@ -23,6 +26,7 @@ dependencies = [
     "requests>=2.34.2",
     "segno>=1.6.6",
     "uuid6>=2025.0.1",
+    "whitenoise>=6.9",
 ]
 
 [dependency-groups]
