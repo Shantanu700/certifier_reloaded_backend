@@ -1,0 +1,103 @@
+# Local development in one command: `docker compose up`, then the API is on http://localhost:8000
+# (API_PORT to change it) and the frontend runs separately with NEXT_PUBLIC_API_URL pointing here.
+# Everything below is local-only: made-up keys, DEBUG on, data in named volumes.
+# Seeded logins: demo_issuer and student01..student50, password "demo-password".
+
+x-app: &app
+  build: .
+  volumes:
+    - .:/app
+  environment:
+    SECRET_KEY: local-only-not-a-secret
+    DEBUG: "1"
+    POSTGRES_DB: certifier
+    POSTGRES_USER: certifier
+    POSTGRES_PASSWORD: certifier
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CELERY_RESULT_BACKEND: redis://redis:6379/0
+    REDIS_CACHE_URL: redis://redis:6379/1
+    # Floci (local AWS). localhost.floci.io is 127.0.0.1 in public DNS, so browsers reach the published
+    # port, and the alias below points containers at Floci: one address, so presigned URLs work from both.
+    AWS_ACCESS_KEY_ID: test
+    AWS_SECRET_ACCESS_KEY: test
+    AWS_STORAGE_BUCKET_NAME: certifier
+    AWS_S3_ENDPOINT_URL: http://localhost.floci.io:4566
+    CERTIFICATE_STORAGE: s3
+    FRONTEND_URL: http://localhost:3000
+    SESSION_COOKIE_SECURE: "0" # the API here is plain http
+    NUM_PROXIES: "1"
+    DEMO_PASSWORD: demo-password
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: certifier
+      POSTGRES_USER: certifier
+      POSTGRES_PASSWORD: certifier
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U certifier -d certifier"]
+      interval: 2s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+
+  floci:
+    image: floci/floci:2.3.0
+    environment:
+      FLOCI_STORAGE_MODE: persistent
+    volumes:
+      - floci-data:/app/data
+    ports:
+      - "4566:4566" # must stay 4566: the port is part of the address in presigned URLs
+    networks:
+      default:
+        aliases:
+          - localhost.floci.io
+
+  # One-shot: bucket, schema (migrations aren't committed) and demo data, before the app starts.
+  init:
+    <<: *app
+    command: >
+      sh -c "python manage.py create_bucket
+      && python manage.py makemigrations
+      && python manage.py migrate
+      && python manage.py seed_fixtures --if-empty"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      floci:
+        condition: service_healthy
+
+  web:
+    <<: *app
+    command: python manage.py runserver 0.0.0.0:8000
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *app
+    command: celery -A config worker -l info
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  floci-data:

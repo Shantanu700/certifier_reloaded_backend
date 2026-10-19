@@ -128,7 +128,7 @@ class Command(BaseCommand):
             f"Seeded {len(TEMPLATES)} templates and {issued} certificates for {len(students)} students."
         ))
         if self.created:
-            shown = "the DEMO_PASSWORD from .env" if os.environ.get("DEMO_PASSWORD") else self.password
+            shown = "the DEMO_PASSWORD setting" if os.environ.get("DEMO_PASSWORD") else self.password
             self.stdout.write(self.style.SUCCESS(
                 f"Logins: {ISSUER} and student01 to student{STUDENTS:02d}, password {shown} (dev only)."
             ))

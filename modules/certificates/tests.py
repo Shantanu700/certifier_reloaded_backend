@@ -244,20 +244,22 @@ class CanvaTemplateTests(TestCase):
             name="Workshop", file=upload("template.png"), owner=self.issuer, canva_design_id="D1", canva_page=1
         )
 
-    @mock.patch("modules.certificates.api.v1.views.CanvaService.export_design")
-    def test_reimporting_a_page_returns_the_existing_template(self, export_design):
+    # The whole service is replaced: building a real one needs Canva keys, which test runs don't have.
+    @mock.patch("modules.certificates.api.v1.views.CanvaService")
+    def test_reimporting_a_page_returns_the_existing_template(self, canva):
         client = APIClient()
         client.force_authenticate(self.issuer)
         response = client.post("/certificate-template/import-canva/", {"design_id": "D1", "name": "Again"}, format="json")
         self.assertEqual(response.status_code, 201)
         self.assertTrue(response.json()["already_imported"])
         self.assertEqual(response.json()["template"]["uuid"], str(self.template.uuid))
-        export_design.assert_not_called()
+        canva.assert_not_called()
         self.assertEqual(CertificateTemplate.objects.count(), 1)
 
     @mock.patch("modules.certificates.api.v1.views.store_canva_export", lambda image: upload("export.png"))
-    @mock.patch("modules.certificates.api.v1.views.CanvaService.export_design")
-    def test_import_that_loses_a_race_returns_the_winner(self, export_design):
+    @mock.patch("modules.certificates.api.v1.views.CanvaService")
+    def test_import_that_loses_a_race_returns_the_winner(self, canva):
+        export_design = canva.return_value.export_design
         export_design.return_value = mock.Mock(width=2480, height=1754, downscaled=False)
         client = APIClient()
         client.force_authenticate(self.issuer)

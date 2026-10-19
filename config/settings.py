@@ -37,7 +37,9 @@ SESSION_COOKIE_HTTPONLY = True
 # calls the API with it (see base.authentication.ServerSessionAuthentication), so nothing needs it cross-site.
 SESSION_COOKIE_SAMESITE = "Lax"
 
-SESSION_COOKIE_SECURE = True
+# HTTPS-only by default; compose.yaml turns it off because its API is plain http (the frontend
+# forwards the session itself either way; this matters for logging into the admin or Swagger).
+SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "1").lower() not in ("0", "false", "no")
 
 # Only needed when the admin is served behind a proxy under another host, e.g. https://api.example.com
 CSRF_TRUSTED_ORIGINS = [origin for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if origin]
@@ -67,6 +69,9 @@ CLOUDINARY_CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME")
 CLOUDINARY_API_KEY = os.environ.get("CLOUDINARY_API_KEY")
 
 CLOUDINARY_API_SECRET = os.environ.get("CLOUDINARY_API_SECRET")
+
+# Where rendered certificates are stored: cloudinary, s3 or local (base.enums.StorageProvider).
+CERTIFICATE_STORAGE = os.environ.get("CERTIFICATE_STORAGE", "cloudinary")
 
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/1")
 
@@ -207,7 +212,7 @@ REST_FRAMEWORK = {
     # Every request comes from the frontend's server, so the visitor's address is in the X-Forwarded-For it
     # forwards. Trust it only when .env says how many proxies append to it (1: just the frontend's host);
     # 0 ignores it and uses the frontend server's own address.
-    "NUM_PROXIES": int(os.environ.get("NUM_PROXIES", "0")),
+    "NUM_PROXIES": int(os.environ.get("NUM_PROXIES") or 0),
     "DEFAULT_THROTTLE_RATES": {
         "login": "10/hour",  # per username tried (base.throttles.LoginRateThrottle)
         "signup": "100/hour",  # per visitor address; generous because a campus shares one address

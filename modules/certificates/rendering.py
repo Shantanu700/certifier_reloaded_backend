@@ -3,10 +3,10 @@ from io import BytesIO
 
 import pymupdf as fitz
 import segno
+from django.conf import settings
 from django.core.files.base import ContentFile
 from PIL import Image, ImageDraw, ImageFont
 
-from base.enums import StorageProvider
 from base.validators import validate_with_schema
 from modules.certificates.choices import MAPPABLE_BOX_TYPES, QR_BOX_TYPES, BoxTypeChoices, TextAlignChoices
 from modules.certificates.fonts import BUNDLED_FONTS
@@ -206,7 +206,7 @@ def box_values(batch, row: dict, boxes, code: str) -> dict[str, str]:
 
 
 def render_file(
-    batch, index: int, row: dict, boxes, image_boxes, code: str, provider: str = StorageProvider.CLOUDINARY
+    batch, index: int, row: dict, boxes, image_boxes, code: str, provider: str | None = None
 ) -> tuple[UploadFile, list[str]]:
     "Renders and uploads one certificate for `row` (values already str); raises on failure. Returns the file and font warnings."
     validate_with_schema(RowDataSchema, row)
@@ -229,7 +229,9 @@ def render_file(
         image.save(buffer, format="PNG")
         filename = f"{base_name}.png"
 
-    upload = UploadFile.upload(ContentFile(buffer.getvalue(), name=filename), provider=provider)
+    upload = UploadFile.upload(
+        ContentFile(buffer.getvalue(), name=filename), provider=provider or settings.CERTIFICATE_STORAGE
+    )
     return upload, warnings
 
 
