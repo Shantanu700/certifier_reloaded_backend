@@ -1,3 +1,4 @@
+from drf_spectacular.authentication import SessionScheme
 from rest_framework.authentication import SessionAuthentication
 
 
@@ -12,3 +13,9 @@ class ServerSessionAuthentication(SessionAuthentication):
 
     def enforce_csrf(self, request):
         return
+
+
+class ServerSessionScheme(SessionScheme):
+    "Documents ServerSessionAuthentication as the session cookie; drf-spectacular only knows the exact base class."
+
+    target_class = "base.authentication.ServerSessionAuthentication"

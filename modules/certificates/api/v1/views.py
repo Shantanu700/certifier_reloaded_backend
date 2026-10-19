@@ -14,6 +14,7 @@ from base.enums import RoleEnum, Status, StorageProvider
 from base.exceptions import CustomError, SerializerError
 from base.pagination import DefaultPagination
 from base.storage import StorageError, get_storage_service
+from base.throttles import AddressRateThrottle
 from base.types import DefaultSuccessResponseType
 from base.validators import validate_with_schema
 from base.views import BaseAV
@@ -31,9 +32,9 @@ from modules.certificates.api.v1.serializers import (
     CertificateBatchUploadSerializer,
     CertificateMatchSerializer,
     CertificateTemplateSerializer,
-    CertificateUpdateSerializer,
     CertificateTemplateUpdateSerializer,
     CertificateTemplateUploadSerializer,
+    CertificateUpdateSerializer,
     GeneratedCertificateSerializer,
     IssuanceCountsSerializer,
     IssueOneSerializer,
@@ -984,11 +985,12 @@ class VerifyCertificateAV(BaseAV):
     "Public: check a certificate by the verification code printed on it"
 
     authentication = False
+    throttle_classes = [AddressRateThrottle]
+    throttle_scope = "verify"
 
     @extend_schema(operation_id="verify_certificate")
     @extend_response(VerifiedCertificateSerializer())
     def get(self, request, code):
-        # ponytail: no throttle; the 60-bit random code can't be guessed. Rate-limit at the proxy if it gets probed.
         normalised = normalise_code(code)
         certificate = (
             GeneratedCertificate.objects.filter(

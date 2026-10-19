@@ -72,6 +72,8 @@ All models inherit `ModelBase`: `uuid` (uuid6), `status`, `created_at`, `updated
 - `REST_FRAMEWORK.DEFAULT_SCHEMA_CLASS = base.openapi.BaseSchema` — the `AutoSchema` subclass behind the OpenAPI generation.
 - Session cookies are `HTTPONLY`, `SAMESITE=Lax`, `SECURE=True` — Lax keeps them off cross-site requests (the CSRF defence for the API); `SECURE` is why logging into the backend directly (admin, Swagger) needs `runsslserver`.
 - `CSRF_TRUSTED_ORIGINS` (comma-separated, from `.env`) is only needed when the admin sits behind a proxy under another host.
+- `DEBUG` and `ALLOWED_HOSTS` come from `.env`; `DEBUG` is off unless set (`DEBUG=1` for dev — media serving and `seed_fixtures` need it).
+- Rate limits (`base/throttles.py`, rates in `REST_FRAMEWORK.DEFAULT_THROTTLE_RATES`): login per username tried (`LoginRateThrottle`), sign-up and public verify per visitor address (`AddressRateThrottle` + `throttle_scope`). Every request arrives from the frontend's server, so the visitor address comes from the `X-Forwarded-For` it forwards, trusted only per `NUM_PROXIES` in `.env`. Limits live in the cache: per process unless `REDIS_CACHE_URL` is set.
 - File-upload limits for `UploadFile` (`MAX_FILE_SIZE` = 1MB, `ALLOWED_IMG_TYPES`, `ALLOWED_CSV_TYPES`) are enforced at the settings level.
 
 ### Tooling caveat

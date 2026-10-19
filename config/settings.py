@@ -25,9 +25,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ["SECRET_KEY"]
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Off unless .env says DEBUG=1: debug pages show stack traces and settings to anyone.
+DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
-ALLOWED_HOSTS = ["*"]
+# Comma-separated hostnames the API is served under. Empty is fine with DEBUG on (localhost only).
+ALLOWED_HOSTS = [host for host in os.environ.get("ALLOWED_HOSTS", "").split(",") if host]
 
 SESSION_COOKIE_HTTPONLY = True
 
@@ -202,7 +204,26 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "base.authentication.ServerSessionAuthentication",
     ],
+    # Every request comes from the frontend's server, so the visitor's address is in the X-Forwarded-For it
+    # forwards. Trust it only when .env says how many proxies append to it (1: just the frontend's host);
+    # 0 ignores it and uses the frontend server's own address.
+    "NUM_PROXIES": int(os.environ.get("NUM_PROXIES", "0")),
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "10/hour",  # per username tried (base.throttles.LoginRateThrottle)
+        "signup": "100/hour",  # per visitor address; generous because a campus shares one address
+        "verify": "120/min",  # per visitor address
+    },
 }
+
+# Rate limits and the email-resend limit live in the cache. The default is per process, so with several
+# server processes point it at Redis.
+if os.environ.get("REDIS_CACHE_URL"):
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": os.environ["REDIS_CACHE_URL"],
+        }
+    }
 
 MEDIA_URL = "/media/"
 
