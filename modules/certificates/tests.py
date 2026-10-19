@@ -5,6 +5,7 @@ from django.test import TestCase, override_settings
 from PIL import Image
 from rest_framework.test import APIClient
 
+from modules.certificates.api.v1.views import scale_boxes
 from modules.certificates.models import CertificateBatch, CertificateTemplate, GeneratedCertificate, TemplateBox
 from modules.certificates.rendering import box_values, draw_qr, generate_certificate_for_row
 from modules.certificates.services import IssuanceError, IssuanceService
@@ -231,3 +232,52 @@ class VerificationCodeTests(TestCase):
         self.assertIn((255, 0, 0), [colour for _, colour in inside])
         self.assertEqual(image.crop((0, 0, 50, 200)).getcolors(), [(50 * 200, (255, 255, 255))])
         self.assertIsNotNone(draw_qr(image, TemplateBox(key="tiny", x=0, y=0, width=5, height=5), "x" * 50))
+
+
+class CanvaTemplateTests(TestCase):
+    def setUp(self):
+        self.issuer = User.objects.create_user("issuer", "issuer@example.com", "x", role="issuer")
+        self.template = CertificateTemplate.objects.create(
+            name="Workshop", file=upload("template.png"), owner=self.issuer, canva_design_id="D1", canva_page=1
+        )
+
+    @mock.patch("modules.certificates.api.v1.views.CanvaService.export_design")
+    def test_reimporting_a_page_returns_the_existing_template(self, export_design):
+        client = APIClient()
+        client.force_authenticate(self.issuer)
+        response = client.post("/certificate-template/import-canva/", {"design_id": "D1", "name": "Again"}, format="json")
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.json()["already_imported"])
+        self.assertEqual(response.json()["template"]["uuid"], str(self.template.uuid))
+        export_design.assert_not_called()
+        self.assertEqual(CertificateTemplate.objects.count(), 1)
+
+    @mock.patch("modules.certificates.api.v1.views.store_canva_export", lambda image: upload("export.png"))
+    @mock.patch("modules.certificates.api.v1.views.CanvaService.export_design")
+    def test_import_that_loses_a_race_returns_the_winner(self, export_design):
+        export_design.return_value = mock.Mock(width=2480, height=1754, downscaled=False)
+        client = APIClient()
+        client.force_authenticate(self.issuer)
+        # The first lookup misses (the other request hasn't committed yet), so the insert hits the constraint.
+        real_filter = CertificateTemplate.objects.filter
+        calls = []
+
+        def first_lookup_misses(*args, **kwargs):
+            calls.append(kwargs)
+            return CertificateTemplate.objects.none() if len(calls) == 1 else real_filter(*args, **kwargs)
+
+        with mock.patch.object(CertificateTemplate.objects, "filter", side_effect=first_lookup_misses):
+            response = client.post("/certificate-template/import-canva/", {"design_id": "D1", "name": "Again"}, format="json")
+        export_design.assert_called_once()  # got past the first lookup, so the insert really ran
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(response.json()["already_imported"])
+        self.assertEqual(response.json()["template"]["uuid"], str(self.template.uuid))
+        self.assertEqual(CertificateTemplate.objects.count(), 1)
+
+    def test_scale_boxes_keeps_qr_boxes_square(self):
+        TemplateBox.objects.create(template=self.template, key="name", x=10, y=20, width=300, height=41, font_size=32)
+        TemplateBox.objects.create(template=self.template, key="scan", type="verify_qr", x=5, y=5, width=99, height=99)
+        scale_boxes(self.template, 2)
+        name, scan = TemplateBox.objects.order_by("key")
+        self.assertEqual((name.x, name.y, name.width, name.height, name.font_size), (20, 40, 600, 82, 64))
+        self.assertEqual((scan.width, scan.height), (198, 198))

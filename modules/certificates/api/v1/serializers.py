@@ -54,10 +54,22 @@ class CanvaTemplateImportSerializer(serializers.Serializer):
 
 class CanvaTemplateImportResultSerializer(serializers.Serializer):
     template = CertificateTemplateSerializer()
-    width = serializers.IntegerField(help_text="Pixel width actually imported.")
-    height = serializers.IntegerField()
+    width = serializers.IntegerField(allow_null=True, help_text="Pixel width actually imported; null when already_imported.")
+    height = serializers.IntegerField(allow_null=True)
     downscaled = serializers.BooleanField(
         help_text="Canva wouldn't export at the requested width (e.g. its Free-plan upscale limit), so the design's own size was used."
+    )
+    already_imported = serializers.BooleanField(
+        help_text="This design page was already a template; `template` is that one and nothing was exported."
+    )
+
+
+class CanvaTemplateSyncSerializer(serializers.Serializer):
+    width = serializers.IntegerField(
+        min_value=MIN_EXPORT_WIDTH,
+        max_value=MAX_EXPORT_WIDTH,
+        required=False,
+        help_text="New export width in pixels; placed boxes are scaled to match. Omit to keep the current size.",
     )
 
 

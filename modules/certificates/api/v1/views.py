@@ -2,7 +2,7 @@ import csv
 
 from django.conf import settings
 from django.core.files.base import ContentFile
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils.decorators import method_decorator
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -17,11 +17,12 @@ from base.storage import StorageError, get_storage_service
 from base.types import DefaultSuccessResponseType
 from base.validators import validate_with_schema
 from base.views import BaseAV
-from modules.canva.services import EXPORT_WIDTH, CanvaError, CanvaService, ExportedImage
+from modules.canva.services import CanvaError, CanvaService, ExportedImage
 from modules.certificates.api.v1.serializers import (
     ALLOWED_TEMPLATE_TYPES,
     CanvaTemplateImportResultSerializer,
     CanvaTemplateImportSerializer,
+    CanvaTemplateSyncSerializer,
     CertificateBatchExportProgressSerializer,
     CertificateBatchMappingSerializer,
     CertificateBatchNamingSerializer,
@@ -202,6 +203,18 @@ def store_canva_export(image: ExportedImage) -> UploadFile:
         raise CustomError(str(exc))
 
 
+def scale_boxes(template: CertificateTemplate, ratio: float) -> None:
+    "Scale every box on a template by `ratio`, for a template file re-exported at a different size."
+    rect = ("x", "y", "width", "height")
+    for queryset, fields in ((template.boxes.all(), (*rect, "font_size")), (template.image_boxes.all(), rect)):
+        boxes = list(queryset)
+        for box in boxes:
+            for field in fields:
+                minimum = 0 if field in ("x", "y") else 1
+                setattr(box, field, max(minimum, round(getattr(box, field) * ratio)))
+        queryset.model.objects.bulk_update(boxes, fields)
+
+
 @method_decorator(transaction.non_atomic_requests, name="dispatch")
 class CertificateTemplateCanvaImportAV(BaseAV):
     "Import one page of a Canva design as a new Certificate Template"
@@ -216,24 +229,52 @@ class CertificateTemplateCanvaImportAV(BaseAV):
             raise SerializerError(serializer.errors)
         data = serializer.validated_data
 
+        existing = self.existing_import(request, data)
+        if existing:
+            return existing
+
         try:
             image = CanvaService(request.user).export_design(data["design_id"], data["page"], width=data["width"])
         except CanvaError as exc:
             self.fail(str(exc))
 
-        with transaction.atomic():
-            template = CertificateTemplate.objects.create(
-                name=data["name"],
-                file=store_canva_export(image),
-                owner=request.user,
-                canva_design_id=data["design_id"],
-                canva_page=data["page"],
-            )
+        try:
+            with transaction.atomic():
+                template = CertificateTemplate.objects.create(
+                    name=data["name"],
+                    file=store_canva_export(image),
+                    owner=request.user,
+                    canva_design_id=data["design_id"],
+                    canva_page=data["page"],
+                )
+        except IntegrityError:
+            # A concurrent import of the same page won the unique_canva_page_per_owner race: hand back that one.
+            # ponytail: this request's export stays in S3 unreferenced; sweep orphans if it ever matters.
+            existing = self.existing_import(request, data)
+            if existing is None:
+                raise
+            return existing
         return {
             "template": CertificateTemplateSerializer(instance=template, context={"request": request}).data,
             "width": image.width,
             "height": image.height,
             "downscaled": image.downscaled,
+            "already_imported": False,
+        }
+
+    def existing_import(self, request, data):
+        "The import response for a page this user already imported, or None."
+        existing = CertificateTemplate.objects.filter(
+            owner=request.user, canva_design_id=data["design_id"], canva_page=data["page"]
+        ).first()
+        if existing is None:
+            return None
+        return {
+            "template": CertificateTemplateSerializer(instance=existing, context={"request": request}).data,
+            "width": None,
+            "height": None,
+            "downscaled": False,
+            "already_imported": True,
         }
 
 
@@ -249,39 +290,47 @@ class CertificateTemplateCanvaSyncAV(BaseAV):
         except CertificateTemplate.DoesNotExist:
             raise NotFound("Certificate template not found.")
 
-    @extend_schema(request=None)
+    @extend_schema(request=CanvaTemplateSyncSerializer)
     @extend_response(CertificateTemplateSerializer())
     def post(self, request, uuid):
         template = self.get_object(request, uuid)
         if not template.canva_design_id:
             self.fail("This template wasn't imported from Canva.")
+        serializer = CanvaTemplateSyncSerializer(data=request.data)
+        if not serializer.is_valid():
+            raise SerializerError(serializer.errors)
+        width = serializer.validated_data.get("width")
 
-        # Box coordinates are image pixels. With boxes placed, re-export at the current width and insist on the
-        # same size, or every box would shift. Without boxes, nothing can shift: take the full EXPORT_WIDTH.
+        # No width keeps the current size. Box coordinates are image pixels: with boxes placed, the design must keep
+        # its shape, and the boxes are scaled when the export size changes. Without boxes, nothing can shift.
+        has_boxes = template.boxes.exists() or template.image_boxes.exists()
         current_size = None
-        if template.boxes.exists() or template.image_boxes.exists():
+        if has_boxes or not width:
             try:
                 with Image.open(template.file.open()) as current:
                     current_size = current.size
             except (StorageError, UnidentifiedImageError, OSError):
-                self.fail("Couldn't read the current template file to check its size, so its boxes might move.")
+                self.fail("Couldn't read the current template file to check its size.")
 
         try:
             image = CanvaService(request.user).export_design(
-                template.canva_design_id,
-                template.canva_page or 1,
-                width=current_size[0] if current_size else EXPORT_WIDTH,
+                template.canva_design_id, template.canva_page or 1, width=width or current_size[0]
             )
         except CanvaError as exc:
             self.fail(str(exc))
 
-        if current_size and current_size != (image.width, image.height):
+        # The actual export width, not the requested one: Canva may downscale (Free-plan limit).
+        ratio = image.width / current_size[0] if has_boxes else 1
+        # One pixel of rounding per side, at the larger of the two scales.
+        if has_boxes and abs(image.height - current_size[1] * ratio) > max(1, ratio):
             self.fail(
-                f"The Canva design now exports at {image.width}×{image.height}px but this template is "
-                f"{current_size[0]}×{current_size[1]}px, so its boxes would move. Import it as a new template instead."
+                f"The Canva design's shape changed ({current_size[0]}×{current_size[1]}px → "
+                f"{image.width}×{image.height}px), so its boxes can't stay in place. Import it as a new template instead."
             )
 
         with transaction.atomic():
+            if ratio != 1:
+                scale_boxes(template, ratio)
             previous_upload = template.file
             template.file = store_canva_export(image)
             template.save()

@@ -36,6 +36,16 @@ class CertificateTemplate(ModelBase):
     canva_design_id = models.CharField(max_length=100, blank=True, default="")
     canva_page = models.PositiveIntegerField(null=True, blank=True)
 
+    class Meta(ModelBase.Meta):
+        constraints = [
+            # One live template per Canva design page per owner; a re-import opens the existing one.
+            models.UniqueConstraint(
+                fields=["owner", "canva_design_id", "canva_page"],
+                condition=Q(status__in=[Status.CREATED, Status.UPDATED]) & ~Q(canva_design_id=""),
+                name="unique_canva_page_per_owner",
+            ),
+        ]
+
 
 class TemplateBox(ModelBase):
     template = models.ForeignKey(CertificateTemplate, on_delete=DEFAULT_ON_DELETE, related_name="boxes")
