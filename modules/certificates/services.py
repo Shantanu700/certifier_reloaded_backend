@@ -4,7 +4,7 @@ from datetime import date, datetime
 from django.db.models import Count, Q
 from django.utils import timezone
 
-from base.enums import RoleEnum, Status
+from base.enums import RoleEnum, Status, StorageProvider
 from modules.certificates.choices import MAPPABLE_BOX_TYPES, CertificateBatchStatusChoices, IssueStatusChoices
 from modules.certificates.models import CertificateBatch, GeneratedCertificate
 from modules.certificates.rendering import load_prepared_image_box, render_file
@@ -60,6 +60,9 @@ def find_recipient(identifier: str) -> User:
 
 class IssuanceService:
     "Matching, issuing and revoking the certificates of one batch."
+
+    # Where rendered certificates are stored; the seed command switches it to local storage.
+    storage_provider = StorageProvider.CLOUDINARY
 
     def __init__(self, batch: CertificateBatch):
         self.batch = batch
@@ -240,6 +243,6 @@ class IssuanceService:
     def _render(self, index: int, row: dict, boxes, code: str):
         try:
             image_boxes = [load_prepared_image_box(box) for box in self.batch.template.image_boxes.all()]
-            return render_file(self.batch, index, row, boxes, image_boxes, code)
+            return render_file(self.batch, index, row, boxes, image_boxes, code, self.storage_provider)
         except Exception as exc:
             raise IssuanceError(f"Couldn't render the certificate: {exc}") from exc
