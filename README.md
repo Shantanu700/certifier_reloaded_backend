@@ -1,8 +1,37 @@
 # Certifier Backend
 
-Django + DRF API for certificate templates and batch certificate generation (rendered in Celery workers).
+Certifier lets an institution or event team design a certificate once, generate it for hundreds of people from a spreadsheet, issue each one to the right person's account, and let anyone check that a certificate is genuine.
 
-Frontend: [certifier_reloaded_frontend](https://github.com/Shantanu700/certifier_reloaded_frontend)
+This repo is the Django + DRF API (certificates render in Celery workers). The web app is [certifier_reloaded_frontend](https://github.com/Shantanu700/certifier_reloaded_frontend).
+
+## Features
+
+**Design templates**
+- Upload a certificate design (PNG or JPG, up to 10 MB), or import a page straight from Canva at the resolution you choose. Refresh it from Canva later, and boxes you've placed are rescaled to fit.
+- Place boxes on the design in a visual editor: text (three fonts, size, colour, alignment; long text shrinks to fit), images such as logos and signatures, QR codes, and a verification QR code and code that fill themselves in. Snap guides, arrow-key nudging and exact position fields help line things up.
+
+**Generate in bulk**
+- Upload a CSV of recipients, match its columns to the boxes, and choose how the files are named (CSV columns, fixed text, sequence numbers, random characters).
+- Certificates render in the background with live progress. Review them, correct one certificate's text and re-make it, and download the lot as a zip, with a list of any rows that failed.
+- Or issue a single certificate by hand, without a CSV.
+
+**Issue to students**
+- Match certificates to student accounts by email, roll number, date of birth, phone, institution or username (verified accounts only), or assign them one by one.
+- Issue a whole batch at once. Revoke a batch, or a single certificate.
+
+**For students**
+- Sign up, verify their email and keep a profile.
+- See and download every certificate issued to them. Revoked certificates stay listed, marked as revoked.
+
+**Public verification**
+- Each certificate can carry a code and a QR code. Anyone can check it at `/verify`, without signing in: it shows who it was issued to, by whom and when, or that it has been revoked.
+
+**Accounts and security**
+- Sign in with a username and password, or with Google. Issuers and students have separate roles.
+- Rate limits on login, sign-up and verification.
+- Light and dark themes.
+
+**Not built yet:** emailing certificates to recipients.
 
 ## Quick start
 
