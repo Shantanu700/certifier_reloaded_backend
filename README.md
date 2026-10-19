@@ -4,68 +4,18 @@ Django + DRF API for certificate templates and batch certificate generation (ren
 
 Frontend: [certifier_reloaded_frontend](https://github.com/Shantanu700/certifier_reloaded_frontend)
 
-## Quick start (Docker)
+## Quick start
 
-Needs only Docker. From the repo root:
+With Docker, from the repo root:
 
 ```bash
 docker compose up
 ```
 
-This starts Postgres, Redis, [Floci](https://github.com/floci-io/floci) (a local AWS standing in for S3), the API on <http://localhost:8000> and a Celery worker. A one-off `init` step creates the storage bucket, the database schema and demo data:
+That runs the API on <http://localhost:8000> with demo data: sign in through the [frontend](https://github.com/Shantanu700/certifier_reloaded_frontend) (with `NEXT_PUBLIC_API_URL=http://localhost:8000`) as `demo_issuer` or `student01`, password `demo-password`.
 
-- Issuer: `demo_issuer`, with three certificate templates
-- Students: `student01` to `student50`, each holding certificates
-- Password for all of them: `demo-password`
-
-Then run the [frontend](https://github.com/Shantanu700/certifier_reloaded_frontend) with `NEXT_PUBLIC_API_URL=http://localhost:8000` in its `.env.local` and sign in at <http://localhost:3000>.
-
-- Port 8000 taken? `API_PORT=8040 docker compose up`, and point the frontend at that port instead.
-- Code changes apply live (the source is mounted); `docker compose up --build` after changing dependencies.
-- `docker compose down -v` deletes everything, including the database and stored files.
-- Offline, the browser can't resolve `localhost.floci.io` (Floci's address, which public DNS points at `127.0.0.1`): add `127.0.0.1 localhost.floci.io` to `/etc/hosts`.
-- Canva import and Google sign-in stay off until you add their keys (see `.env.sample`).
-
-## Manual setup
-
-### Requirements
-
-- Python 3.13 and [uv](https://docs.astral.sh/uv/)
-- PostgreSQL
-- Redis (Celery broker / result backend)
-- S3-compatible bucket or Cloudinary account for file storage
-
-### Setup
-
-```bash
-cp .env.sample .env        # then fill in values
-uv sync
-uv run manage.py makemigrations   # migrations are gitignored
-uv run manage.py migrate
-uv run manage.py createsuperuser
-```
-
-Django does not load `.env` on its own. Inside the devcontainer it comes from `docker/nonprod/docker-compose.yaml`; elsewhere, export it first (`set -a; source .env; set +a`).
-
-### Run
-
-```bash
-uv run manage.py runsslserver 0.0.0.0:8001   # HTTPS; session cookies are Secure
-uv run manage.py runserver 0.0.0.0:8000      # plain HTTP: set SESSION_COOKIE_SECURE=0 to log into admin/Swagger
-uv run celery -A config worker -l info       # required for certificate generation
-```
-
-API docs: `/api/schema/swagger-ui/` and `/api/schema/redoc/`.
-
-### Devcontainer
-
-Open in VS Code and "Reopen in Container". The container joins the external `dev_db_network`, so create it and have Postgres running on it first:
-
-```bash
-docker network create dev_db_network
-```
-
-Ports: `8022` → 8000 (HTTP), `8033` → 8001 (HTTPS). The container idles; start the server yourself.
+- **Developing:** [docs/development.md](docs/development.md) covers the Docker setup, running without Docker, the frontend, optional integrations (Google, Canva, email) and troubleshooting.
+- **Running it for real:** [docs/self-hosting.md](docs/self-hosting.md) walks through a production deployment and ends with a checklist.
 
 ## Endpoints
 
@@ -142,3 +92,13 @@ docker compose exec web python manage.py test modules.core.tests modules.certifi
 ```
 
 See [CLAUDE.md](CLAUDE.md) for architecture and conventions (`base/` framework, soft deletes, error shapes).
+
+## Contributing
+
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Commits need a DCO sign-off (`git commit -s`), and everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately, as described in [SECURITY.md](SECURITY.md).
+
+## Licence
+
+Copyright (C) 2026 Shantanu Gupta.
+
+Certifier is free software: you can redistribute it and/or modify it under the terms of the [GNU Affero General Public License, version 3](LICENSE). If you run a modified version as a network service, the AGPL requires you to offer its users the source code of your version.

@@ -44,6 +44,11 @@ SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "1").lower() not
 # Only needed when the admin is served behind a proxy under another host, e.g. https://api.example.com
 CSRF_TRUSTED_ORIGINS = [origin for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if origin]
 
+# Behind a proxy that terminates HTTPS: believe its X-Forwarded-Proto, or Django thinks every request is
+# plain http. Only safe when the proxy sets that header itself and the app can't be reached around it.
+if os.environ.get("TRUST_PROXY_HTTPS", "").lower() in ("1", "true", "yes"):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 ALLOWED_IMG_TYPES = {"jpeg": "image/jpeg", "jpg": "image/jpeg", "png": "image/png"}
 
 MAX_FILE_SIZE = 10000000
@@ -130,6 +135,8 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Serves STATIC_ROOT (the admin's and Swagger's CSS/JS) from the app itself, so no web server is needed for it.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -259,7 +266,7 @@ SPECTACULAR_SETTINGS = {
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "Asia/Kolkata"
+TIME_ZONE = os.environ.get("TIME_ZONE", "Asia/Kolkata")
 
 USE_I18N = True
 
@@ -270,3 +277,6 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = "static/"
+
+# `manage.py collectstatic` gathers here, for WhiteNoise to serve.
+STATIC_ROOT = BASE_DIR / "staticfiles"
