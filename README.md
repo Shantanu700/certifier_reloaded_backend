@@ -43,8 +43,16 @@ docker compose up
 
 That runs the API on <http://localhost:8000> with demo data: sign in through the [frontend](https://github.com/Shantanu700/certifier_reloaded_frontend) (with `NEXT_PUBLIC_API_URL=http://localhost:8000`) as `demo_issuer` or `student01`, password `demo-password`.
 
-- **Developing:** [docs/development.md](docs/development.md) covers the Docker setup, running without Docker, the frontend, optional integrations (Google, Canva, email) and troubleshooting.
-- **Running it for real:** [docs/self-hosting.md](docs/self-hosting.md) walks through a production deployment and ends with a checklist.
+[docs/development.md](docs/development.md) covers the Docker setup, running without Docker, the frontend, optional integrations (Google, Canva, email) and troubleshooting.
+
+## Going live
+
+[docs/self-hosting.md](docs/self-hosting.md) walks through a production deployment step by step. In short:
+
+1. **Services**: PostgreSQL, Redis, an SMTP server (students must verify their email) and a private S3-compatible bucket with a CORS rule for your frontend's address. Cloudinary too, unless you set `CERTIFICATE_STORAGE=s3`.
+2. **API and worker**: set the environment variables listed in `.env.sample` (the same ones for both), run `makemigrations`, `migrate` and `collectstatic`, then run gunicorn and a Celery worker under a process manager. Keep the generated migration files: they're part of your deployment from then on.
+3. **Frontend**: build the [frontend](https://github.com/Shantanu700/certifier_reloaded_frontend) with `NEXT_PUBLIC_API_URL` pointing at the API, and serve it behind a reverse proxy with HTTPS. Only the frontend's server calls the API, so the API can stay on a private network.
+4. **Before launch**: work through the [production checklist](docs/self-hosting.md#production-checklist).
 
 ## Endpoints
 
